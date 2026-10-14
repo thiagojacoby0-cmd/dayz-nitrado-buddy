@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { api, type Session } from "@/lib/nitrado";
+import { api, demoSession, type Session } from "@/lib/nitrado";
 import { TypesEditor } from "@/components/editor/TypesEditor";
 import { XmlTableEditor } from "@/components/editor/XmlTableEditor";
 import { GameplayEditor } from "@/components/editor/GameplayEditor";
