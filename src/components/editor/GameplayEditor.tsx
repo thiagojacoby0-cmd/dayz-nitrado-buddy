@@ -18,7 +18,7 @@ function Node({ k, v, onChange, depth }: { k: string; v: J; onChange: (v: J) => 
     <div className="ml-3 flex items-center gap-3 border-l border-border py-0.5 pl-3">
       <span className="w-72 truncate font-mono text-xs" title={k}>{k}</span>
       {typeof v === "boolean" ? (
-        <button onClick={() => onChange(!v)} className={`btn h-6 ${v ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>{v ? "true" : "false"}</button>
+        <button onClick={() => onChange(!v)} className={`btn h-6 ${v ? "bg-green-500/20 text-green-400" : "bg-muted text-muted-foreground"}`}>{v ? "Ativado" : "Desativado"}</button>
       ) : typeof v === "number" ? (
         <input className="field h-7 w-32 font-mono" type="number" step="any" value={v} onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))} />
       ) : typeof v === "string" ? (
