@@ -23,7 +23,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-const TABS = ["Servidor", "Loot", "Peso", "Gameplay", "Eventos", "Globals", "Spawns", "Arquivos"] as const;
+const TABS = ["Servidor", "Loot", "Peso", "Gameplay", "Eventos", "Globals", "Arquivos"] as const;
 type Tab = (typeof TABS)[number];
 
 function Index() {
@@ -120,7 +120,6 @@ function Index() {
         {tab === "Gameplay" && <GameplayEditor s={session} onJson={setGameplay} />}
         {tab === "Eventos" && <XmlTableEditor s={session} rel="db/events.xml" tag="event" mode="children" />}
         {tab === "Globals" && <XmlTableEditor s={session} rel="db/globals.xml" tag="var" mode="attrs" />}
-        {tab === "Spawns" && <XmlTableEditor s={session} rel="cfgeventspawns.xml" tag="event" mode="children" />}
         {tab === "Arquivos" && <FilesPanel s={session} root={root} onSetMission={updMission} />}
       </section>
     </main>
