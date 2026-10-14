@@ -39,6 +39,7 @@ export function MapPanel() {
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState<Kind | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [showCities, setShowCities] = useState(true);
   const [hover, setHover] = useState<{ x: number; z: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -73,6 +74,7 @@ export function MapPanel() {
             </button>
           ))}
           <div className="ml-auto flex items-center gap-1">
+            <button className={showCities ? "btn-primary" : "btn-ghost"} onClick={() => setShowCities((s) => !s)}>Cidades</button>
             <button className="btn-ghost" onClick={() => setZoom((z) => Math.max(1, z - 0.5))}>−</button>
             <span className="w-10 text-center text-xs">{zoom}x</span>
             <button className="btn-ghost" onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>+</button>
@@ -84,6 +86,13 @@ export function MapPanel() {
             onClick={onClick} onMouseMove={(e) => setHover(toWorld(e))} onMouseLeave={() => setHover(null)}>
             <img src={mapImg} alt="Mapa" width={1536} height={1536} className="absolute inset-0 size-full select-none" draggable={false} />
             <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: "linear-gradient(to right, color-mix(in oklab, var(--foreground) 12%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 12%, transparent) 1px, transparent 1px)", backgroundSize: "10% 10%" }} />
+            {showCities && CITIES.map(([name, x, z]) => (
+              <span key={name} className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 text-center"
+                style={{ left: `${(x / SIZE) * 100}%`, top: `${(1 - z / SIZE) * 100}%` }}>
+                <span className="mx-auto block size-1.5 rounded-full bg-foreground/70" />
+                <span className="whitespace-nowrap rounded-sm bg-background/70 px-1 text-[10px] font-medium">{name}</span>
+              </span>
+            ))}
             {visible.map((m) => (
               <button key={m.id} title={m.name} onClick={(e) => { e.stopPropagation(); setSel(m.id); }}
                 className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${(m.x / SIZE) * 100}%`, top: `${(1 - m.z / SIZE) * 100}%` }}>
