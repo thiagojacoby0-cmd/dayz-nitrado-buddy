@@ -9,6 +9,14 @@ type Row = {
 };
 const NUM = ["nominal", "min", "lifetime", "restock", "quantmin", "quantmax", "cost"] as const;
 const FLAGS = ["count_in_cargo", "count_in_hoarder", "count_in_map", "count_in_player", "crafted", "deloot"];
+const FLAG_PT: Record<string, string> = {
+  count_in_cargo: "Conta dentro de contêineres/veículos",
+  count_in_hoarder: "Conta em esconderijos de jogadores",
+  count_in_map: "Conta no chão do mapa",
+  count_in_player: "Conta no inventário dos jogadores",
+  crafted: "Item é fabricável",
+  deloot: "Aparece em eventos dinâmicos (helicrashes etc.)",
+};
 
 function parse(xml: string): Row[] {
   const doc = new DOMParser().parseFromString(xml, "text/xml");
@@ -95,7 +103,8 @@ export function TypesEditor({ s }: { s: Session }) {
             <tr>
               <th className="p-2">Item</th><th className="p-2" title="Peso de referência (fixo no Xbox)">Peso</th>
               {NUM.map((k) => <th key={k} className="p-2">{k}</th>)}
-              <th className="p-2">category</th><th className="p-2">usage</th><th className="p-2">value</th><th className="p-2">flags</th><th />
+              <th className="p-2">category</th><th className="p-2">usage</th><th className="p-2">value</th>
+              <th className="p-2" title={FLAGS.map((k) => `${k.replace("count_in_", "").charAt(0).toUpperCase()} = ${FLAG_PT[k]}`).join("\n")}>flags ⓘ</th><th />
             </tr>
           </thead>
           <tbody>
@@ -110,8 +119,9 @@ export function TypesEditor({ s }: { s: Session }) {
                   <td className="px-1">
                     <div className="flex gap-0.5">
                       {FLAGS.map((k) => (
-                        <button key={k} title={k} onClick={() => upd(i, { flags: { ...r.flags, [k]: r.flags[k] === "1" ? "0" : "1" } })}
-                          className={`h-5 w-5 rounded-sm font-mono text-[9px] ${r.flags[k] === "1" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
+                        <button key={k} title={`${FLAG_PT[k]} — clique para ${r.flags[k] === "1" ? "desativar" : "ativar"}`}
+                          onClick={() => upd(i, { flags: { ...r.flags, [k]: r.flags[k] === "1" ? "0" : "1" } })}
+                          className={`h-5 w-5 rounded-sm font-mono text-[9px] ${r.flags[k] === "1" ? "bg-green-500/25 text-green-400" : "bg-muted text-muted-foreground"}`}>
                           {k.replace("count_in_", "").charAt(0).toUpperCase()}
                         </button>
                       ))}
