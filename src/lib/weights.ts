@@ -1,0 +1,35 @@
+// Peso de referência (gramas) dos itens vanilla do DayZ. No Xbox o peso real é fixo no jogo.
+export const ITEM_WEIGHTS: Record<string, number> = {
+  AKM: 3500, AK74: 3070, AK101: 3400, AKS74U: 2700, M4A1: 2900, FAL: 4300, SVD: 4300, VSS: 2600, ASVAL: 2500,
+  Mosin9130: 4000, Winchester70: 3600, CZ527: 2800, SKS: 3850, Repeater: 3100, Izh18: 3100, Saiga: 3600,
+  MP5K: 1900, UMP45: 2300, CZ61: 1300, PP19: 2700, FNX45: 900, Glock19: 600, CZ75: 1100, Deagle: 1900, MKII: 1100,
+  Mp133Shotgun: 3500, Izh43Shotgun: 3400, B95: 3800, Scout: 3300, Aug: 3600, FAMAS: 3600, M14: 4100, M79: 2700,
+  Mag_AKM_30Rnd: 400, Mag_STANAG_30Rnd: 120, Mag_FAL_20Rnd: 240, Mag_SVD_10Rnd: 210, Mag_CMAG_40Rnd: 200,
+  Ammo_762x39: 330, Ammo_556x45: 240, Ammo_762x54: 450, Ammo_308Win: 480, Ammo_9x19: 160, Ammo_45ACP: 300, Ammo_12gaPellets: 400,
+  M4_Suppressor: 300, AK_Suppressor: 500, PistolSuppressor: 150, ACOGOptic: 450, PSO1Optic: 600, M4_RISHndgrd: 200, M68Optic: 250,
+  BandageDressing: 40, Rag: 20, Morphine: 50, Epinephrine: 50, SalineBag: 500, BloodBagEmpty: 100, BloodTestKit: 60,
+  TetracyclineAntibiotics: 30, CharcoalTablets: 30, PainkillerTablets: 30, VitaminBottle: 50, FirstAidKit: 300, Splint: 400,
+  BakedBeansCan: 400, TunaCan: 200, SardinesCan: 150, PeachesCan: 450, SpaghettiCan: 450, Rice: 1000, PowderedMilk: 400,
+  Apple: 150, Banana: 120, Orange: 150, Tomato: 100, Potato: 200, WaterBottle: 1100, Canteen: 1100, SodaCan_Cola: 350,
+  Hatchet: 800, WoodAxe: 2300, FirefighterAxe: 3000, Pickaxe: 3200, Shovel: 2000, Hammer: 600, SledgeHammer: 7800,
+  Hacksaw: 400, HandSaw: 700, Pliers: 300, Screwdriver: 150, Lockpick: 50, CombatKnife: 300, HuntingKnife: 250, KitchenKnife: 200,
+  Machete: 900, Crowbar: 1800, BaseballBat: 1000, Pipe: 1200, NailBox: 1000, Nail: 10, MetalWire: 500, Rope: 500,
+  WoodenPlank: 700, WoodenLog: 3000, MetalPlate: 2500, Firewood: 500, Stone: 600, Matchbox: 30, Flashlight: 300,
+  Headtorch_Black: 200, Battery9V: 50, Roadflare: 300, Chemlight_White: 70, PersonalRadio: 250, CanOpener: 50,
+  CodeLock: 500, CombinationLock: 500, Fence: 0, Watchtower: 0, TerritoryFlagKit: 2000, FenceKit: 2000, WatchtowerKit: 2000,
+  MediumTent: 6000, LargeTent: 12000, CarTent: 15000, SeaChest: 3000, WoodenCrate: 1500, Barrel_Green: 9000,
+  AliceBag_Green: 3000, MountainBag_Red: 2000, TaloonBag_Blue: 800, AssaultBag_Ttsko: 1500, HuntingBag: 1800, CourierBag: 600,
+  PlateCarrierVest: 7000, PressVest_Blue: 5000, HighCapacityVest_Black: 1500, SmershVest: 1200, UKAssVest_Black: 1500,
+  BallisticHelmet_Green: 1900, GorkaHelmet: 2200, Mich2001Helmet: 1500, MotoHelmet_Black: 1200, GasMask: 700,
+  M65Jacket_Black: 1100, GorkaEJacket_Summer: 1300, TTsKOJacket_Camo: 1000, HuntingJacket_Spring: 1000,
+  CargoPants_Blue: 600, GorkaPants_Summer: 900, TTSKOPants: 700, HunterPants_Spring: 800, MilitaryBoots_Black: 1000,
+  CombatBoots_Black: 1100, WorkingGloves_Black: 200, TacticalGloves_Black: 200, NVGoggles: 600, Binoculars: 500, Rangefinder: 600,
+  CarBattery: 12000, TruckBattery: 18000, SparkPlug: 100, HeadlightH7: 150, Radiator: 4000, TireRepairKit: 600, CanisterGasoline: 1500,
+  Grenade_ChemGas: 500, M67Grenade: 400, RGD5Grenade: 400, FlashGrenade: 350, LandMineTrap: 3000, BearTrap: 2000, ImprovisedExplosive: 2500,
+};
+
+export const weightOf = (name: string): number | undefined => {
+  if (name in ITEM_WEIGHTS) return ITEM_WEIGHTS[name];
+  const k = Object.keys(ITEM_WEIGHTS).find((n) => name.startsWith(n) || n.startsWith(name.split("_")[0]) && name.split("_")[0].length > 3);
+  return k ? ITEM_WEIGHTS[k] : undefined;
+};
