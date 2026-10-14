@@ -2,6 +2,27 @@ import { useEffect, useState } from "react";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { FileState, useRemoteFile } from "./useFile";
 
+/** Colunas que funcionam como liga/desliga (valor "1" = ativo, "0" = inativo). */
+const BOOL_COLS = new Set([
+  "active", "enabled", "dynamic_event", "count_in_cargo", "count_in_hoarder",
+  "count_in_map", "count_in_player", "crafted", "deloot", "player", "usable", "checked",
+]);
+
+function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`flex w-24 items-center gap-1.5 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold transition-colors ${
+        on ? "border-green-500/50 bg-green-500/15 text-green-400" : "border-border bg-muted text-muted-foreground"
+      }`}
+    >
+      <span className={`h-3 w-3 rounded-full ${on ? "bg-green-400" : "bg-muted-foreground/50"}`} />
+      {on ? "Ativo" : "Inativo"}
+    </button>
+  );
+}
+
 /** Edita elementos repetidos de um XML (ex: <event> em events.xml, <var> em globals.xml). */
 export function XmlTableEditor({ s, rel, tag, mode }: { s: Session; rel: string; tag: string; mode: "children" | "attrs" }) {
   const path = missionFile(s, rel);
