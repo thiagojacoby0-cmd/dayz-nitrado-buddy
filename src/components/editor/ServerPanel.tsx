@@ -25,7 +25,8 @@ export function ServerPanel({ s, gs, reload }: { s: Session; gs: any; reload: ()
     <div className="space-y-4">
       <div className="panel flex flex-wrap items-center gap-6 p-4">
         <div><p className="text-xs text-muted-foreground">Status</p><p className={`font-display text-2xl ${gs?.status === "started" ? "text-success" : "text-destructive"}`}>{gs?.status ?? "—"}</p></div>
-        <div><p className="text-xs text-muted-foreground">Jogadores</p><p className="font-display text-2xl">{gs?.query?.player_current ?? 0} / {gs?.slots ?? "?"}</p></div>
+        <div><p className="text-xs text-muted-foreground">Jogadores online</p><p className="font-display text-2xl">{gs?.query?.player_current ?? 0} / {gs?.slots ?? "?"}</p></div>
+        <div title="A quantidade de vagas (slots) é definida no painel da Nitrado, não por arquivo do jogo"><p className="text-xs text-muted-foreground">Vagas do servidor ⓘ</p><p className="font-display text-2xl">{gs?.slots ?? "?"}</p></div>
         <div><p className="text-xs text-muted-foreground">Nome</p><p className="font-semibold">{gs?.query?.server_name ?? gs?.settings?.config?.hostname ?? "—"}</p></div>
         <div className="ml-auto flex gap-2">
           <button className="btn-ghost" onClick={reload}>Atualizar</button>
