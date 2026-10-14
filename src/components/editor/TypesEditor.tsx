@@ -9,6 +9,14 @@ type Row = {
 };
 const NUM = ["nominal", "min", "lifetime", "restock", "quantmin", "quantmax", "cost"] as const;
 const FLAGS = ["count_in_cargo", "count_in_hoarder", "count_in_map", "count_in_player", "crafted", "deloot"];
+const FLAG_PT: Record<string, string> = {
+  count_in_cargo: "Conta dentro de contêineres/veículos",
+  count_in_hoarder: "Conta em esconderijos de jogadores",
+  count_in_map: "Conta no chão do mapa",
+  count_in_player: "Conta no inventário dos jogadores",
+  crafted: "Item é fabricável",
+  deloot: "Aparece em eventos dinâmicos (helicrashes etc.)",
+};
 
 function parse(xml: string): Row[] {
   const doc = new DOMParser().parseFromString(xml, "text/xml");
