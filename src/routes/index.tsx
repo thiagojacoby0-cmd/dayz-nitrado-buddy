@@ -84,7 +84,13 @@ function Index() {
           <p className="text-sm text-muted-foreground">Conecte sua conta Nitrado para editar seu servidor DayZ Xbox: loot, eventos, gameplay, peso e configurações.</p>
           <input className="field w-full" type="password" placeholder="Token de acesso da Nitrado" value={token} onChange={(e) => setToken(e.target.value)} />
           <button className="btn-primary w-full justify-center" disabled={busy || !token} onClick={() => connect()}>{busy ? "Conectando…" : "Conectar"}</button>
-          <p className="text-xs text-muted-foreground">Crie o token em nitrado.net → Minha conta → Developer Portal → Long-life Token (permissão "service"). Ele fica salvo só neste navegador.</p>
+          <button className="btn-ghost w-full justify-center" onClick={() => {
+            const d = demoSession();
+            localStorage.clear();
+            setToken(d.token); setServiceId(d.serviceId); setMission(d.mission);
+            setServices([{ id: d.serviceId, type: "gameserver", details: { name: "Servidor Demo · DayZ Xbox" } }]);
+          }}>Entrar sem token (modo demonstração)</button>
+          <p className="text-xs text-muted-foreground">Crie o token em nitrado.net → Minha conta → Developer Portal → Long-life Token (permissão "service"). Ele fica salvo só neste navegador. No modo demonstração você explora o editor com dados de exemplo, sem mexer no seu servidor.</p>
         </div>
       </main>
     );
