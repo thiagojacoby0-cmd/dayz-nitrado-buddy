@@ -70,7 +70,9 @@ export function XmlTableEditor({ s, rel, tag, mode }: { s: Session; rel: string;
                 {columns.map((c) => (
                   <td key={c} className="min-w-20 px-1">
                     {mode === "children" && !e.getElementsByTagName(c)[0] ? <span className="text-muted-foreground">—</span> :
-                      <input className="cell" value={get(e, c)} onChange={(ev) => set(e, c, ev.target.value)} />}
+                      BOOL_COLS.has(c) && (get(e, c) === "0" || get(e, c) === "1") ?
+                        <Toggle on={get(e, c) === "1"} onToggle={() => set(e, c, get(e, c) === "1" ? "0" : "1")} /> :
+                        <input className="cell" value={get(e, c)} onChange={(ev) => set(e, c, ev.target.value)} />}
                   </td>
                 ))}
               </tr>
