@@ -103,7 +103,8 @@ export function TypesEditor({ s }: { s: Session }) {
             <tr>
               <th className="p-2">Item</th><th className="p-2" title="Peso de referência (fixo no Xbox)">Peso</th>
               {NUM.map((k) => <th key={k} className="p-2">{k}</th>)}
-              <th className="p-2">category</th><th className="p-2">usage</th><th className="p-2">value</th><th className="p-2">flags</th><th />
+              <th className="p-2">category</th><th className="p-2">usage</th><th className="p-2">value</th>
+              <th className="p-2" title={FLAGS.map((k) => `${k.replace("count_in_", "").charAt(0).toUpperCase()} = ${FLAG_PT[k]}`).join("\n")}>flags ⓘ</th><th />
             </tr>
           </thead>
           <tbody>
