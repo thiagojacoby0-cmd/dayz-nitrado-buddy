@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { weightOf } from "@/lib/weights";
 import { FileState, useRemoteFile } from "./useFile";
@@ -47,6 +47,31 @@ function serialize(rows: Row[]) {
 }
 
 const PAGE = 60;
+const LABEL: Record<string, string> = { nominal: "Quantidade no mapa", min: "Mínimo", lifetime: "Tempo no chão (s)", restock: "Reposição (s)", quantmin: "Carga mín %", quantmax: "Carga máx %", cost: "Prioridade" };
+const HELP: Record<string, string> = {
+  nominal: "Quantos desse item o servidor tenta manter espalhados no mapa",
+  min: "Quando cair abaixo disso, o servidor volta a gerar o item",
+  lifetime: "Quanto tempo o item fica no chão antes de sumir (segundos)",
+  restock: "Espera (segundos) antes de repor o item",
+  quantmin: "Carga/quantidade mínima (munição, água…). -1 = padrão",
+  quantmax: "Carga/quantidade máxima. -1 = padrão",
+  cost: "Prioridade de spawn (normalmente 100)",
+};
+const USAGES: [string, string][] = [["Military","Militar"],["Police","Polícia"],["Medic","Hospital/Médico"],["Firefighter","Bombeiros"],["Industrial","Industrial"],["Farm","Fazenda"],["Coast","Litoral"],["Town","Cidade"],["Village","Vila"],["Hunting","Caça"],["Office","Escritório"],["School","Escola"],["Prison","Prisão"],["Lunapark","Parque"],["ContaminatedArea","Zona contaminada"],["Historical","Histórico"]];
+const TIERS: [string, string][] = [["Tier1","Tier 1 · Litoral (fraco)"],["Tier2","Tier 2 · Interior"],["Tier3","Tier 3 · Norte"],["Tier4","Tier 4 · Militar forte"],["Unique","Único"]];
+const TAGS: [string, string][] = [["floor","No chão"],["shelves","Em prateleiras"],["ground","Ao ar livre"]];
+const CATS: [string, string][] = [["weapons","Armas"],["clothes","Roupas"],["food","Comida"],["tools","Ferramentas"],["containers","Recipientes"],["explosives","Explosivos"],["vehiclesparts","Peças de veículo"],["lootdispatch","Recompensas de eventos"]];
+
+function Chips({ title, opts, value, onChange }: { title: string; opts: [string, string][]; value: string; onChange: (v: string) => void }) {
+  const cur = value.split(",").filter(Boolean);
+  return (
+    <div><p className="mb-1 text-xs font-semibold text-muted-foreground">{title}</p>
+      <div className="flex flex-wrap gap-1">{opts.map(([k, l]) => { const on = cur.includes(k); return (
+        <button key={k} onClick={() => onChange((on ? cur.filter((x) => x !== k) : [...cur, k]).join(","))}
+          className={`rounded-full border px-2 py-0.5 text-xs ${on ? "border-primary bg-primary/20 text-primary" : "border-border text-muted-foreground"}`}>{l}</button>); })}</div>
+    </div>
+  );
+}
 
 export function TypesEditor({ s }: { s: Session }) {
   const path = missionFile(s, "db/types.xml");
@@ -57,6 +82,7 @@ export function TypesEditor({ s }: { s: Session }) {
   const [page, setPage] = useState(0);
   const [mult, setMult] = useState("2");
   const [dirty, setDirty] = useState(false);
+  const [edit, setEdit] = useState<number | null>(null);
 
   useEffect(() => { if (f.text) { setRows(parse(f.text)); setDirty(false); } }, [f.text]);
 
@@ -90,7 +116,7 @@ export function TypesEditor({ s }: { s: Session }) {
         </select>
         <span className="text-xs text-muted-foreground">{filtered.length} de {rows.length} itens</span>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Multiplicar nominal/min dos filtrados ×</span>
+          <span className="text-xs text-muted-foreground">Multiplicar quantidade/mínimo dos filtrados ×</span>
           <input className="field w-16" value={mult} onChange={(e) => setMult(e.target.value)} />
           <button className="btn-ghost" onClick={bulk}>Aplicar</button>
           <button className="btn-ghost" onClick={add}>+ Item</button>
@@ -102,8 +128,8 @@ export function TypesEditor({ s }: { s: Session }) {
           <thead className="bg-secondary font-display text-sm tracking-wider text-muted-foreground">
             <tr>
               <th className="p-2">Item</th><th className="p-2" title="Peso de referência (fixo no Xbox)">Peso</th>
-              {NUM.map((k) => <th key={k} className="p-2">{k}</th>)}
-              <th className="p-2">category</th><th className="p-2">usage</th><th className="p-2">value</th>
+              {NUM.map((k) => <th key={k} className="p-2" title={HELP[k]}>{LABEL[k]} ⓘ</th>)}
+              <th className="p-2" title="Locais e regiões onde o item aparece">Onde cai ⓘ</th>
               <th className="p-2" title={FLAGS.map((k) => `${k.replace("count_in_", "").charAt(0).toUpperCase()} = ${FLAG_PT[k]}`).join("\n")}>flags ⓘ</th><th />
             </tr>
           </thead>
@@ -111,11 +137,12 @@ export function TypesEditor({ s }: { s: Session }) {
             {view.map(({ r, i }) => {
               const w = weightOf(r.name);
               return (
-                <tr key={i} className="border-t border-border hover:bg-muted/50">
+                <Fragment key={i}><tr className="border-t border-border hover:bg-muted/50">
                   <td className="min-w-48 px-2 font-mono font-semibold">{r.name}</td>
                   <td className="whitespace-nowrap px-2 font-mono text-primary">{w !== undefined ? `${(w / 1000).toFixed(2)} kg` : "—"}</td>
                   {NUM.map((k) => <td key={k} className="w-20 px-1"><input className="cell" value={r[k]} onChange={(e) => upd(i, { [k]: e.target.value })} /></td>)}
-                  {(["category", "usage", "value"] as const).map((k) => <td key={k} className="min-w-28 px-1"><input className="cell" value={r[k]} onChange={(e) => upd(i, { [k]: e.target.value })} /></td>)}
+                  <td className="min-w-40 px-1"><button className="btn-ghost h-6 w-full truncate text-xs" onClick={() => setEdit(edit === i ? null : i)}>
+                    {[r.usage, r.value].filter(Boolean).join(" · ").replace(/,/g, ", ") || "Escolher…"}</button></td>
                   <td className="px-1">
                     <div className="flex gap-0.5">
                       {FLAGS.map((k) => (
@@ -129,6 +156,14 @@ export function TypesEditor({ s }: { s: Session }) {
                   </td>
                   <td className="px-1"><button className="text-destructive" title="Remover" onClick={() => { setRows((rs) => rs.filter((_, j) => j !== i)); setDirty(true); }}>✕</button></td>
                 </tr>
+                {edit === i && <tr className="bg-muted/30"><td colSpan={NUM.length + 5} className="space-y-3 p-3">
+                  <Chips title="Tipo de lugar (também define de quais zumbis cai: militar, policial, médico…)" opts={USAGES} value={r.usage} onChange={(v) => upd(i, { usage: v })} />
+                  <Chips title="Região do mapa (tier)" opts={TIERS} value={r.value} onChange={(v) => upd(i, { value: v })} />
+                  <Chips title="Posição no prédio" opts={TAGS} value={r.tag} onChange={(v) => upd(i, { tag: v })} />
+                  <Chips title="Categoria" opts={CATS} value={r.category} onChange={(v) => upd(i, { category: v })} />
+                  <button className="btn-ghost h-7 text-xs" onClick={() => setEdit(null)}>Fechar</button>
+                </td></tr>}
+                </Fragment>
               );
             })}
           </tbody>
