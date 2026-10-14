@@ -11,7 +11,7 @@ function demoFile(path: string): string {
   const norm = path.replace(/^\/+/, "");
   if (!demoFiles.has(norm)) {
     const key = Object.keys(DEMO_FILES).find((k) => norm === k || norm.endsWith("/" + k) || k.endsWith("/" + norm));
-    if (key) demoFiles.set(norm, DEMO_FILES[key]);
+    if (key !== undefined) demoFiles.set(norm, DEMO_FILES[key]);
     else throw new Error(`Arquivo não encontrado no modo demonstração: ${path}`);
   }
   return demoFiles.get(norm)!;
