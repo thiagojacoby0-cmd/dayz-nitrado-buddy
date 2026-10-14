@@ -10,7 +10,7 @@ export function WeightPanel({ gameplay }: { gameplay: any }) {
   useEffect(() => { try { setOver(JSON.parse(localStorage.getItem(KEY) || "{}")); } catch { /* vazio */ } }, []);
   const saveOver = (o: Record<string, number>) => { setOver(o); localStorage.setItem(KEY, JSON.stringify(o)); };
 
-  const w = (n: string) => over[n] ?? ITEM_WEIGHTS[n];
+  const w = (n: string): number => over[n] ?? ITEM_WEIGHTS[n] ?? 0;
   const list = useMemo(() => Object.keys(ITEM_WEIGHTS).filter((n) => n.toLowerCase().includes(q.toLowerCase())), [q]);
   const total = Object.entries(load).reduce((a, [n, c]) => a + w(n) * c, 0) / 1000;
 

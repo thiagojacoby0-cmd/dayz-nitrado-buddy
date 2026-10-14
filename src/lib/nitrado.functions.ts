@@ -10,7 +10,7 @@ async function call(token: string, method: string, path: string, body?: unknown)
   const res = await fetch(BASE + path, {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? JSON.stringify(body) : null,
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`Nitrado [${res.status}]: ${text.slice(0, 300)}`);
@@ -18,7 +18,7 @@ async function call(token: string, method: string, path: string, body?: unknown)
 }
 
 export const nitradoRequest = createServerFn({ method: "POST" })
-  .inputValidator((d: { token: string; method: "GET" | "POST" | "PUT" | "DELETE"; path: string; body?: Record<string, string> }) => {
+  .inputValidator((d: { token: string; method: "GET" | "POST" | "PUT" | "DELETE"; path: string; body?: Record<string, string> | undefined }) => {
     if (!d.token) throw new Error("Token ausente");
     checkPath(d.path);
     return d;

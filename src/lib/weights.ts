@@ -30,6 +30,7 @@ export const ITEM_WEIGHTS: Record<string, number> = {
 
 export const weightOf = (name: string): number | undefined => {
   if (name in ITEM_WEIGHTS) return ITEM_WEIGHTS[name];
-  const k = Object.keys(ITEM_WEIGHTS).find((n) => name.startsWith(n) || n.startsWith(name.split("_")[0]) && name.split("_")[0].length > 3);
+  const base = name.split("_")[0] ?? name;
+  const k = Object.keys(ITEM_WEIGHTS).find((n) => name.startsWith(n) || (base.length > 3 && n.startsWith(base)));
   return k ? ITEM_WEIGHTS[k] : undefined;
 };

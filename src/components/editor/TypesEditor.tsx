@@ -112,7 +112,7 @@ export function TypesEditor({ s }: { s: Session }) {
                       {FLAGS.map((k) => (
                         <button key={k} title={k} onClick={() => upd(i, { flags: { ...r.flags, [k]: r.flags[k] === "1" ? "0" : "1" } })}
                           className={`h-5 w-5 rounded-sm font-mono text-[9px] ${r.flags[k] === "1" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
-                          {k.replace("count_in_", "")[0].toUpperCase()}
+                          {k.replace("count_in_", "").charAt(0).toUpperCase()}
                         </button>
                       ))}
                     </div>

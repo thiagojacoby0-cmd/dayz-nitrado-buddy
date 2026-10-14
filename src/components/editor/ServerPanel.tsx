@@ -14,7 +14,7 @@ export function ServerPanel({ s, gs, reload }: { s: Session; gs: any; reload: ()
   const save = async () => {
     try {
       for (const [ck, value] of Object.entries(changed)) {
-        const [category, key] = ck.split("::");
+        const [category = "", key = ""] = ck.split("::");
         await api(s, "POST", `/services/${s.serviceId}/gameservers/settings`, { category, key, value });
       }
       toast.success("Configurações salvas"); setChanged({}); reload();
