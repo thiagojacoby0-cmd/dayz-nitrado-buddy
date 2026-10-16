@@ -65,44 +65,67 @@ export function ZombieLootEditor({ s }: { s: Session }) {
   }, [f.text]);
 
   const upd = (pi: number, ii: number, patch: Partial<LootItem>) => {
-    setPresets((ps) => ps.map((p, j) => (j === pi ? { ...p, items: p.items.map((it, k) => (k === ii ? { ...it, ...patch } : it)) } : p)));
+    setPresets((ps) =>
+      ps.map((p, j) =>
+        j === pi
+          ? { ...p, items: p.items.map((it, k) => (k === ii ? { ...it, ...patch } : it)) }
+          : p,
+      ),
+    );
     setDirty(true);
   };
   const addItem = (pi: number) => {
     const name = prompt("Nome da classe do item (ex: BandageDressing)");
     if (!name) return;
-    setPresets((ps) => ps.map((p, j) => (j === pi ? { ...p, items: [...p.items, { name, chance: "0.5", quantmin: "-1", quantmax: "-1" }] } : p)));
+    setPresets((ps) =>
+      ps.map((p, j) =>
+        j === pi
+          ? { ...p, items: [...p.items, { name, chance: "0.5", quantmin: "-1", quantmax: "-1" }] }
+          : p,
+      ),
+    );
     setDirty(true);
   };
   const removeItem = (pi: number, ii: number) => {
-    setPresets((ps) => ps.map((p, j) => (j === pi ? { ...p, items: p.items.filter((_, k) => k !== ii) } : p)));
+    setPresets((ps) =>
+      ps.map((p, j) => (j === pi ? { ...p, items: p.items.filter((_, k) => k !== ii) } : p)),
+    );
     setDirty(true);
   };
 
   const list = useMemo(() => presets, [presets]);
 
-  if (!f.text) return <FileState loading={f.loading} error={f.error} path={path} onRetry={f.load} />;
+  if (!f.text)
+    return <FileState loading={f.loading} error={f.error} path={path} onRetry={f.load} />;
 
   return (
     <div className="space-y-3">
       <div className="panel space-y-1 p-4 text-sm">
         <p>
-          Aqui você escolhe <strong>o que cai dos zumbis</strong> quando você os mata. Cada grupo abaixo é um tipo de
-          zumbi; dentro dele ficam os itens e a <strong>chance</strong> de cada um aparecer.
+          Aqui você escolhe <strong>o que cai dos zumbis</strong> quando você os mata. Cada grupo
+          abaixo é um tipo de zumbi; dentro dele ficam os itens e a <strong>chance</strong> de cada
+          um aparecer.
         </p>
         <p className="text-xs text-muted-foreground">
-          Chance vai de 0 a 1: 1.0 = sempre cai, 0.5 = metade das vezes, 0.1 = raro. Salve e reinicie o servidor para
-          aplicar.
+          Chance vai de 0 a 1: 1.0 = sempre cai, 0.5 = metade das vezes, 0.1 = raro. Salve e
+          reinicie o servidor para aplicar.
         </p>
       </div>
       <div className="flex justify-end">
-        <button className="btn-primary" disabled={!dirty || f.saving} onClick={() => f.save(serialize(presets))}>
+        <button
+          className="btn-primary"
+          disabled={!dirty || f.saving}
+          onClick={() => f.save(serialize(presets))}
+        >
           {f.saving ? "Salvando…" : "Salvar loot dos zumbis"}
         </button>
       </div>
       {list.map((p, pi) => (
         <div key={p.name} className="panel p-4">
-          <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen(open === p.name ? null : p.name)}>
+          <button
+            className="flex w-full items-center gap-2 text-left"
+            onClick={() => setOpen(open === p.name ? null : p.name)}
+          >
             <span className="text-primary">{open === p.name ? "▾" : "▸"}</span>
             <h3 className="text-xl text-primary">{PRESET_PT[p.name] ?? p.name}</h3>
             <span className="ml-auto text-xs text-muted-foreground">{p.items.length} itens</span>
@@ -117,15 +140,40 @@ export function ZombieLootEditor({ s }: { s: Session }) {
                 <span />
               </div>
               {p.items.map((it, ii) => (
-                <div key={ii} className="grid grid-cols-[1fr_90px_90px_90px_24px] items-center gap-2">
-                  <span className="truncate font-mono text-xs font-semibold" title={it.name}>{it.name}</span>
-                  <input className="cell" value={it.chance} onChange={(e) => upd(pi, ii, { chance: e.target.value })} />
-                  <input className="cell" value={it.quantmin} onChange={(e) => upd(pi, ii, { quantmin: e.target.value })} />
-                  <input className="cell" value={it.quantmax} onChange={(e) => upd(pi, ii, { quantmax: e.target.value })} />
-                  <button className="text-destructive" title="Remover" onClick={() => removeItem(pi, ii)}>✕</button>
+                <div
+                  key={ii}
+                  className="grid grid-cols-[1fr_90px_90px_90px_24px] items-center gap-2"
+                >
+                  <span className="truncate font-mono text-xs font-semibold" title={it.name}>
+                    {it.name}
+                  </span>
+                  <input
+                    className="cell"
+                    value={it.chance}
+                    onChange={(e) => upd(pi, ii, { chance: e.target.value })}
+                  />
+                  <input
+                    className="cell"
+                    value={it.quantmin}
+                    onChange={(e) => upd(pi, ii, { quantmin: e.target.value })}
+                  />
+                  <input
+                    className="cell"
+                    value={it.quantmax}
+                    onChange={(e) => upd(pi, ii, { quantmax: e.target.value })}
+                  />
+                  <button
+                    className="text-destructive"
+                    title="Remover"
+                    onClick={() => removeItem(pi, ii)}
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
-              <button className="btn-ghost mt-2 h-7 text-xs" onClick={() => addItem(pi)}>+ Adicionar item</button>
+              <button className="btn-ghost mt-2 h-7 text-xs" onClick={() => addItem(pi)}>
+                + Adicionar item
+              </button>
             </div>
           )}
         </div>

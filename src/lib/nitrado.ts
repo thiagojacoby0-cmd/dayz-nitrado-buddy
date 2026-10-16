@@ -10,7 +10,9 @@ const demoFiles = new Map<string, string>();
 function demoFile(path: string): string {
   const norm = path.replace(/^\/+/, "");
   if (!demoFiles.has(norm)) {
-    const key = Object.keys(DEMO_FILES).find((k) => norm === k || norm.endsWith("/" + k) || k.endsWith("/" + norm));
+    const key = Object.keys(DEMO_FILES).find(
+      (k) => norm === k || norm.endsWith("/" + k) || k.endsWith("/" + norm),
+    );
     if (key !== undefined) demoFiles.set(norm, DEMO_FILES[key]!);
     else throw new Error(`Arquivo não encontrado no modo demonstração: ${path}`);
   }
@@ -19,7 +21,18 @@ function demoFile(path: string): string {
 
 async function demoApi<T>(method: string, path: string): Promise<T> {
   if (path === "/services") {
-    return { status: "success", data: { services: [{ id: DEMO_SERVICE_ID, type: "gameserver", details: { name: "Servidor Demo · DayZ Xbox", game: "DayZ (Xbox)" } }] } } as T;
+    return {
+      status: "success",
+      data: {
+        services: [
+          {
+            id: DEMO_SERVICE_ID,
+            type: "gameserver",
+            details: { name: "Servidor Demo · DayZ Xbox", game: "DayZ (Xbox)" },
+          },
+        ],
+      },
+    } as T;
   }
   if (path.includes("/gameservers") && method === "GET") {
     return {
@@ -40,7 +53,12 @@ async function demoApi<T>(method: string, path: string): Promise<T> {
   return { status: "success", data: {} } as T;
 }
 
-export async function api<T = any>(s: { token: string }, method: "GET" | "POST" | "DELETE", path: string, body?: Record<string, string>): Promise<T> {
+export async function api<T = any>(
+  s: { token: string },
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  body?: Record<string, string>,
+): Promise<T> {
   if (isDemo(s)) return demoApi<T>(method, path);
   const text = await nitradoRequest({ data: { token: s.token, method, path, body } });
   return JSON.parse(text);
@@ -57,9 +75,21 @@ export function writeFile(s: Session, file: string, content: string) {
     return Promise.resolve({ status: "success" });
   }
   const i = file.lastIndexOf("/");
-  return nitradoWriteFile({ data: { token: s.token, serviceId: s.serviceId, dir: file.slice(0, i), name: file.slice(i + 1), content } });
+  return nitradoWriteFile({
+    data: {
+      token: s.token,
+      serviceId: s.serviceId,
+      dir: file.slice(0, i),
+      name: file.slice(i + 1),
+      content,
+    },
+  });
 }
 
-export const demoSession = (): Session => ({ token: "demo", serviceId: String(DEMO_SERVICE_ID), mission: DEMO_MISSION });
+export const demoSession = (): Session => ({
+  token: "demo",
+  serviceId: String(DEMO_SERVICE_ID),
+  mission: DEMO_MISSION,
+});
 
 export const missionFile = (s: Session, rel: string) => `${s.mission.replace(/\/$/, "")}/${rel}`;
