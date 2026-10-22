@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api, demoSession, type Session } from "@/lib/nitrado";
 import { TypesEditor } from "@/components/editor/TypesEditor";
 import { CreatureLootEditor } from "@/components/editor/CreatureLootEditor";
+import { EventsEditor } from "@/components/editor/EventsEditor";
 import { XmlTableEditor } from "@/components/editor/XmlTableEditor";
 import { GameplayEditor } from "@/components/editor/GameplayEditor";
 import { WeightPanel } from "@/components/editor/WeightPanel";
@@ -15,13 +16,13 @@ import { ToolsPanel } from "@/components/editor/ToolsPanel";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "DayZ Editor · Servidor Nitrado Xbox" },
+      { title: "Fronteira Z Editor · Servidor Nitrado Xbox" },
       {
         name: "description",
         content:
           "Edite loot, eventos, gameplay, peso e configurações do seu servidor DayZ Xbox na Nitrado.",
       },
-      { property: "og:title", content: "DayZ Editor · Servidor Nitrado Xbox" },
+      { property: "og:title", content: "Fronteira Z Editor · Servidor Nitrado Xbox" },
       {
         property: "og:description",
         content: "Editor completo para servidores DayZ Xbox hospedados na Nitrado.",
@@ -47,13 +48,21 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+type NitradoService = {
+  id: string | number;
+  type: string;
+  details?: { name?: string; game?: string };
+};
+
 function Index() {
   const [token, setToken] = useState("");
-  const [services, setServices] = useState<any[]>([]);
+  const [services, setServices] = useState<NitradoService[]>([]);
   const [serviceId, setServiceId] = useState("");
   const [mission, setMission] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [gs, setGs] = useState<any>(null);
   const [tab, setTab] = useState<Tab>("Servidor");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [gameplay, setGameplay] = useState<any>(null);
   const [busy, setBusy] = useState(false);
 
@@ -68,11 +77,13 @@ function Index() {
     setBusy(true);
     try {
       const r = await api({ token: t }, "GET", "/services");
-      const list = (r.data?.services ?? []).filter((x: any) => x.type === "gameserver");
+      const list = ((r as { data?: { services?: NitradoService[] } })?.data?.services ?? []).filter(
+        (x) => x.type === "gameserver",
+      );
       setServices(list);
       localStorage.setItem("nitrado-token", t);
       if (!list.length) toast.error("Nenhum servidor encontrado nesta conta");
-      else if (!list.find((x: any) => String(x.id) === serviceId)) setServiceId(String(list[0].id));
+      else if (!list.find((x) => String(x.id) === serviceId)) setServiceId(String(list[0].id));
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -115,61 +126,94 @@ function Index() {
 
   if (!services.length) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4">
-        <div className="panel w-full max-w-md space-y-4 p-8">
-          <h1 className="text-5xl text-primary">DayZ Editor</h1>
-          <p className="text-sm text-muted-foreground">
-            Conecte sua conta Nitrado para editar seu servidor DayZ Xbox: loot, eventos, gameplay,
-            peso e configurações.
-          </p>
-          <input
-            className="field w-full"
-            type="password"
-            placeholder="Token de acesso da Nitrado"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <button
-            className="btn-primary w-full justify-center"
-            disabled={busy || !token}
-            onClick={() => connect()}
-          >
-            {busy ? "Conectando…" : "Conectar"}
-          </button>
-          <button
-            className="btn-ghost w-full justify-center"
-            onClick={() => {
-              const d = demoSession();
-              localStorage.clear();
-              setToken(d.token);
-              setServiceId(d.serviceId);
-              setMission(d.mission);
-              setServices([
-                {
-                  id: d.serviceId,
-                  type: "gameserver",
-                  details: { name: "Servidor Demo · DayZ Xbox" },
-                },
-              ]);
-            }}
-          >
-            Entrar sem token (modo demonstração)
-          </button>
-          <p className="text-xs text-muted-foreground">
-            Crie o token em nitrado.net → Minha conta → Developer Portal → Long-life Token
-            (permissão "service"). Ele fica salvo só neste navegador. No modo demonstração você
-            explora o editor com dados de exemplo, sem mexer no seu servidor.
+      <main className="flex min-h-screen items-center justify-center px-4 bg-background">
+        <div className="panel w-full max-w-md space-y-5 p-8 border-primary/30 shadow-2xl">
+          <div className="space-y-1">
+            <h1 className="text-5xl text-primary font-display tracking-wider">
+              Fronteira Z Editor
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Editor completo para servidores DayZ Xbox: loot do mapa, kit inicial de spawn, animais
+              e zumbis, durabilidade e eventos.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-md border border-primary/40 bg-primary/10 space-y-2">
+            <div className="font-semibold text-sm text-primary flex items-center gap-1.5">
+              <span>🎮</span> Não tem token da Nitrado ainda?
+            </div>
+            <p className="text-xs text-foreground/80 leading-relaxed">
+              Você pode usar o editor agora mesmo no modo demonstração com todos os arquivos do DayZ
+              liberados (Loot, Animais e Zumbis, Kit Inicial, Durabilidade e Mapa).
+            </p>
+            <button
+              className="btn-primary w-full justify-center text-sm py-2 shadow-md shadow-primary/20"
+              onClick={() => {
+                const d = demoSession();
+                localStorage.clear();
+                setToken(d.token);
+                setServiceId(d.serviceId);
+                setMission(d.mission);
+                setServices([
+                  {
+                    id: d.serviceId,
+                    type: "gameserver",
+                    details: { name: "Servidor Demo · DayZ Xbox" },
+                  },
+                ]);
+              }}
+            >
+              🚀 Entrar no Modo Demonstração (Sem Token)
+            </button>
+          </div>
+
+          <div className="relative flex items-center justify-center">
+            <div className="border-t border-border w-full" />
+            <span className="bg-card px-2 text-[11px] uppercase tracking-wider text-muted-foreground absolute">
+              ou conecte com sua conta
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              className="field w-full text-xs"
+              type="password"
+              placeholder="Token de acesso da Nitrado (opcional)"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <button
+              className="btn-ghost w-full justify-center text-xs"
+              disabled={busy || !token}
+              onClick={() => connect()}
+            >
+              {busy ? "Conectando ao servidor…" : "Conectar com Token da Nitrado"}
+            </button>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground text-center">
+            No modo demonstração nada é alterado no servidor real e você pode testar todas as
+            tabelas livremente.
           </p>
         </div>
       </main>
     );
   }
 
+  const isDemoMode = token === "demo";
+
   return (
     <main className="min-h-screen">
       <header className="border-b border-border bg-sidebar">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <h1 className="text-3xl text-primary">DayZ Editor</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl text-primary font-display">Fronteira Z Editor</h1>
+            {isDemoMode && (
+              <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full bg-primary/20 border border-primary/40 text-primary">
+                Modo Demonstração (Sem Token)
+              </span>
+            )}
+          </div>
           <select
             className="field"
             value={serviceId}
@@ -216,14 +260,12 @@ function Index() {
         </nav>
       </header>
       <section className="p-4">
-        {tab === "Servidor" && <ServerPanel s={session} gs={gs} reload={loadGs} />}
+        {tab === "Servidor" && <ServerPanel s={session} gs={gs} reload={loadGs} root={root} />}
         {tab === "Loot" && <TypesEditor s={session} />}
         {tab === "Animais e Zumbis" && <CreatureLootEditor s={session} />}
         {tab === "Peso" && <WeightPanel gameplay={gameplay} />}
         {tab === "Gameplay" && <GameplayEditor s={session} onJson={setGameplay} />}
-        {tab === "Eventos" && (
-          <XmlTableEditor s={session} rel="db/events.xml" tag="event" mode="children" />
-        )}
+        {tab === "Eventos" && <EventsEditor s={session} />}
         {tab === "Globals" && (
           <XmlTableEditor s={session} rel="db/globals.xml" tag="var" mode="attrs" />
         )}

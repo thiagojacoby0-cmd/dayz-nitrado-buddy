@@ -79,10 +79,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "DayZ Editor · Nitrado Xbox" },
+      { title: "Fronteira Z Editor · Nitrado Xbox" },
       { name: "description", content: "Editor completo de servidor DayZ Xbox na Nitrado" },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "DayZ Editor · Nitrado Xbox" },
+      { property: "og:title", content: "Fronteira Z Editor · Nitrado Xbox" },
       { property: "og:description", content: "Editor completo de servidor DayZ Xbox na Nitrado" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { FileState, useRemoteFile } from "./useFile";
 
-type J = any;
+type J = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 function Node({
   k,
@@ -108,7 +108,7 @@ export function GameplayEditor({ s, onJson }: { s: Session; onJson?: (j: J) => v
         setRaw(true);
       }
     }
-  }, [f.text]);
+  }, [f.text, onJson]);
   if (!f.text)
     return <FileState loading={f.loading} error={f.error} path={path} onRetry={f.load} />;
 

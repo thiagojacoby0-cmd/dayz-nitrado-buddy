@@ -3,7 +3,18 @@ import { ITEM_WEIGHTS } from "@/lib/weights";
 
 const KEY = "dayz-weight-overrides";
 
-export function WeightPanel({ gameplay }: { gameplay: any }) {
+type GameplayData = {
+  PlayerData?: {
+    StaminaData?: {
+      staminaWeightLimitThreshold?: number;
+      staminaKgToStaminaPercentPenalty?: number;
+      staminaMax?: number;
+      staminaMinCap?: number;
+    };
+  };
+};
+
+export function WeightPanel({ gameplay }: { gameplay: GameplayData | null | undefined }) {
   const [over, setOver] = useState<Record<string, number>>({});
   const [q, setQ] = useState("");
   const [load, setLoad] = useState<Record<string, number>>({});

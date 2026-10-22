@@ -173,10 +173,64 @@ export const ITEM_LABELS: Record<string, string> = {
   Mag_Glock19_15Rnd: "Carregador 15 tiros Glock 19",
   Mag_FNX45_15Rnd: "Carregador 15 tiros FNX-45",
   Mag_IJ70_8Rnd: "Carregador 8 tiros IJ-70 Makarov",
+  // Armas e Equipamentos Recentes (DayZ 1.20 - 1.26 Frostline)
+  DMR: "DMR (Designated Marksman Rifle .308)",
+  Mag_DMR_10Rnd: "Carregador 10 tiros DMR (.308)",
+  Mag_DMR_20Rnd: "Carregador 20 tiros DMR (.308)",
+  SV98: "SV-98 (Rifle Sniper Tático 7.62x54R)",
+  Mag_SV98_10Rnd: "Carregador 10 tiros SV-98",
+  Vikhr: "SR-3M Vikhr (Fuzil Compacto 9x39mm)",
+  Mag_Vikhr_30Rnd: "Carregador 30 tiros Vikhr (9x39mm)",
+  M14: "M14 (Rifle de Batalha Militar)",
+  Crossbow_Autumn: "Besta de Caça (Silenciosa)",
+  Crossbow_Black: "Besta Tática Preta",
+  Crossbow_Wood: "Besta de Madeira Clássica",
+  Ammo_HuntingBolt: "Flechas de Caça para Besta",
+  Ammo_ImprovisedBolt: "Flechas Artesanais para Besta",
+  SawedoffMosin9130: "Mosin 91/30 Cano Serrado",
+  SawedoffIzh43Shotgun: "Escopeta BK-43 Cano Serrado",
+  SawedoffB95: "Blaze 95 Cano Serrado",
+  SawedoffMagnum: "Magnum .357 Cano Curto",
+  // Acessórios e Miras Novas
+  PPOptic: "Mira Óptica 1P78 (Russa)",
+  KazuarOptic: "Mira Noturna 1PN93 Kazuar (NVG)",
+  StarlightOptic: "Mira Noturna Starlight Militar",
+  // Explosivos e Utilitários Novos
+  Plastic_Explosive: "Explosivo Plástico C4",
+  RemoteDetonator: "Detonador Remoto para C4",
+  RemoteDetonatorTrigger: "Gatilho de Detonação Remota",
+  AlarmClock: "Despertador com Timer (Armadilhas)",
+  KitchenTimer: "Timer de Cozinha para IED",
+  ImprovisedExplosive: "Bolsa de Explosivo IED Artesanal",
+  Blowtorch: "Maçarico a Gás de Solda",
+  LargeGasCanister: "Botijão de Gás Grande",
+  GasMask_Filter: "Filtro para Máscara de Gás",
+  POX_Vial: "Frasco com Gás Químico Tóxico POX",
+  FieldShovel: "Pá Dobrável Tática Militar",
+  MedievalSword: "Espada Longa Medieval",
+  Mace: "Maça de Ferro Medieval",
+  NorseAxe: "Machado Viking Nórdico",
+  Chainmail_Coif: "Cota de Malha (Capuz)",
+  Chainmail_Chest: "Cota de Malha (Torso)",
+  Chainmail_Leggings: "Cota de Malha (Pernas)",
+  ChestRig_Green: "Colete Peitoral Chest Rig Verde",
+  ChestRig_Black: "Colete Peitoral Chest Rig Preto",
+  // Veículo Humvee M1025 e Peças Novas
+  Offroad_02_Wheel: "Roda de Humvee Militar M1025",
+  Offroad_02_Door_1_1: "Porta de Humvee Militar M1025",
+  Offroad_02_Hood: "Capô de Humvee Militar",
+  Offroad_02_Trunk: "Porta-Malas de Humvee Militar",
+  GlowPlug: "Vela de Aquecimento Glow Plug (Humvee/M3S)",
+  // Roupas de Inverno / Frostline
+  WinterCoats_Green: "Casaco de Frio Extremo Verde",
+  WinterCoats_Blue: "Casaco de Frio Extremo Azul",
+  WoolCoat_Black: "Casaco Pesado de Lã Preta",
+  ReindeerPelt: "Pele de Rena Ártica",
+  FoxPelt: "Pele de Raposa Silvestre",
 };
 
 export const ITEMS: ItemDef[] = [
-  // ===== Rifles de assalto =====
+  // ===== Rifles de assalto e batalha =====
   ["M4A1", 10, W, MIL],
   ["AKM", 8, W, MIL],
   ["AK101", 6, W, MIL],
@@ -188,7 +242,11 @@ export const ITEMS: ItemDef[] = [
   ["M16A2", 6, W, MIL],
   ["VSS", 5, W, MIL],
   ["ASVAL", 5, W, MIL],
-  // ===== Rifles de precisão / caça =====
+  ["M14", 8, W, MIL],
+  ["Vikhr", 8, W, MIL],
+  // ===== Rifles de precisão / caça / Snipers Recentes =====
+  ["DMR", 6, W, MIL],
+  ["SV98", 5, W, MIL],
   ["SVD", 5, W, MIL],
   ["Mosin9130", 25, W, HUNT],
   ["SKS", 15, W, MIL],
@@ -201,6 +259,13 @@ export const ITEMS: ItemDef[] = [
   ["SSG82", 5, W, MIL],
   ["Scout5_22", 12, W, MIL],
   ["Winchester70", 8, W, HUNT],
+  ["Crossbow_Autumn", 15, W, HUNT],
+  ["Crossbow_Black", 12, W, HUNT],
+  ["Crossbow_Wood", 15, W, HUNT],
+  ["SawedoffMosin9130", 12, W, HUNT],
+  ["SawedoffB95", 10, W, HUNT],
+  ["SawedoffIzh43Shotgun", 15, W, HUNT],
+  ["SawedoffMagnum", 10, W, COAST],
   // ===== Submetralhadoras =====
   ["MP5K", 15, W, POL],
   ["UMP45", 12, W, POL],
@@ -265,7 +330,9 @@ export const ITEMS: ItemDef[] = [
   ["Bipod", 8, T, MIL],
   ["UniversalLight", 12, T, MIL],
   ["PistolLight", 12, T, POL],
-  ["BayonetM4", 8, T, MIL],
+  ["PPOptic", 10, T, MIL],
+  ["KazuarOptic", 6, T, MIL],
+  ["StarlightOptic", 5, T, MIL],
   // ===== Carregadores =====
   ["Mag_M4_30Rnd", 20, W, MIL],
   ["Mag_AKM_30Rnd", 20, W, MIL],
@@ -286,6 +353,10 @@ export const ITEMS: ItemDef[] = [
   ["Mag_Ruger1022_30Rnd", 15, W, HUNT],
   ["Mag_CZ527_5rnd", 15, W, HUNT],
   ["Mag_M14_20Rnd", 8, W, MIL],
+  ["Mag_DMR_10Rnd", 15, W, MIL],
+  ["Mag_DMR_20Rnd", 10, W, MIL],
+  ["Mag_SV98_10Rnd", 15, W, MIL],
+  ["Mag_Vikhr_30Rnd", 15, W, MIL],
   // ===== Munição =====
   ["Ammo_556x45", 40, W, MIL],
   ["Ammo_762x39", 40, W, MIL],
@@ -303,6 +374,8 @@ export const ITEMS: ItemDef[] = [
   ["Ammo_40mm_Grenade", 10, W, MIL],
   ["Ammo_9x39AP", 15, W, MIL],
   ["Ammo_556x45Tracer", 20, W, MIL],
+  ["Ammo_HuntingBolt", 35, W, HUNT],
+  ["Ammo_ImprovisedBolt", 25, W, HUNT],
   // ===== Roupas — cabeça =====
   ["BallisticHelmet_Green", 8, C, MIL],
   ["GorkaHelmet", 8, C, MIL],
@@ -590,13 +663,21 @@ export const ITEMS: ItemDef[] = [
 // Eventos vanilla do DayZ: [nome, nominal, posição, limite]
 type EventDef = [name: string, nominal: number, position: string, limit: string];
 const EVENTS: EventDef[] = [
+  // ===== Comboios e Quedas Especiais (Eventos Dinâmicos Famosos) =====
+  ["PoliceConvoy", 3, "fixed", "custom"],
+  ["MilitaryConvoy", 3, "fixed", "custom"],
+  ["HeliCrash", 3, "player", "custom"],
+  ["Wreck_UH1Y", 3, "player", "custom"],
+  ["Wreck_Mi8", 3, "player", "custom"],
+  ["TrainWreck", 4, "fixed", "custom"],
+  ["SantaSleigh", 2, "player", "custom"],
   // Veículos
   ["VehicleOffroadHatchback", 3, "fixed", "child"],
   ["VehicleOffroad02", 3, "fixed", "child"],
   ["VehicleSedan02", 3, "fixed", "child"],
   ["VehicleHatchback02", 3, "fixed", "child"],
   ["VehicleTruck01", 2, "fixed", "child"],
-  // Helicrashes e zonas contaminadas
+  // Zonas contaminadas
   ["StaticContaminatedArea", 10, "fixed", "mixed"],
   ["DynamicContaminatedArea", 6, "player", "mixed"],
   // Animais
@@ -934,7 +1015,41 @@ const cfgspawnabletypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="y
 </spawnabletypes>
 `;
 
+const serverDzCfg = `hostname = "DayZ Brasil · Nitrado Xbox [Loot x2 | PvP]";
+password = "";
+passwordAdmin = "";
+maxPlayers = 32;
+verifySignatures = 2;
+forceSameBuild = 1;
+disableVoN = 0;
+vonCodecQuality = 20;
+disable3rdPerson = 0;
+disableCrosshair = 0;
+disablePersonalLight = 0;
+lightingConfig = 0;
+serverTime = "SystemTime";
+serverTimeAcceleration = 6;
+serverNightTimeAcceleration = 4;
+serverTimePersistent = 0;
+guaranteedUpdates = 1;
+loginQueueConcurrentPlayers = 5;
+loginQueueMaxPlayers = 500;
+instanceId = 1;
+storageAutoFix = 1;
+respawnTime = 0;
+motd[] = {"Bem-vindo ao servidor DayZ!", "Divirta-se com loot x2 e eventos ativos!"};
+motdInterval = 60;
+class Missions
+{
+    class DayZ
+    {
+        template = "dayzOffline.chernarusplus";
+    };
+};
+`;
+
 export const DEMO_FILES: Record<string, string> = {
+  "serverDZ.cfg": serverDzCfg,
   "db/types.xml": typesXml,
   "db/events.xml": eventsXml,
   "db/globals.xml": globalsXml,
