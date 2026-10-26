@@ -4,7 +4,7 @@ import { missionFile, type Session } from "@/lib/nitrado";
 import { weightOf } from "@/lib/weights";
 import { FileState, useRemoteFile } from "./useFile";
 import { StarterLootEditor } from "./StarterLootEditor";
-import { ITEM_LABELS } from "@/lib/demo-data";
+import { ITEM_LABELS, getItemLabel } from "@/lib/demo-data";
 import { Percent, SlidersHorizontal, Sparkles, RotateCcw } from "lucide-react";
 
 type Row = {
@@ -360,7 +360,7 @@ export function TypesEditor({ s }: { s: Session }) {
         .map((r, i) => ({ r, i }))
         .filter(({ r }) => {
           const query = q.toLowerCase();
-          const label = (ITEM_LABELS[r.name] ?? "").toLowerCase();
+          const label = (ITEM_LABELS[r.name] ?? getItemLabel(r.name)).toLowerCase();
           const matchQ = !query || r.name.toLowerCase().includes(query) || label.includes(query);
           const matchCat = !cat || r.category.split(",").includes(cat);
           return matchQ && matchCat;
@@ -687,7 +687,7 @@ export function TypesEditor({ s }: { s: Session }) {
               <tbody>
                 {view.map(({ r, i }) => {
                   const w = weightOf(r.name);
-                  const label = ITEM_LABELS[r.name];
+                  const label = ITEM_LABELS[r.name] ?? getItemLabel(r.name);
                   const durBadge = getDurabilityBadge(r.quantmin, r.quantmax);
 
                   return (

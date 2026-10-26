@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { FileState, useRemoteFile } from "./useFile";
+import { getItemLabel } from "@/lib/demo-data";
 
 // Editor do cfgrandompresets.xml: define o loot que cai dos zumbis (infectados).
 // Cada <lootPresets name="..."> é um grupo usado pelos tipos de zumbi em types.xml
@@ -144,9 +145,17 @@ export function ZombieLootEditor({ s }: { s: Session }) {
                   key={ii}
                   className="grid grid-cols-[1fr_90px_90px_90px_24px] items-center gap-2"
                 >
-                  <span className="truncate font-mono text-xs font-semibold" title={it.name}>
-                    {it.name}
-                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span
+                      className="truncate text-xs font-semibold text-foreground"
+                      title={it.name}
+                    >
+                      {getItemLabel(it.name)}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground truncate">
+                      {it.name}
+                    </span>
+                  </div>
                   <input
                     className="cell"
                     value={it.chance}

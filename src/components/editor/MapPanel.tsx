@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import mapImg from "@/assets/map-chernarus.jpg";
+import mapImgSat from "@/assets/map-chernarus-sat.jpg";
 import {
   ShieldAlert,
   Crosshair,
@@ -25,27 +26,29 @@ import {
   CircleDot,
   FileCode,
   Shield,
+  ShieldCheck,
   Percent,
   SlidersHorizontal,
   Trash2,
   Ruler,
-  Route,
-  HeartPulse,
-  Castle,
-  Factory,
-  Navigation,
-  Train,
-  Milestone,
-  Satellite,
+  Swords,
+  Bomb,
+  Download,
+  Zap,
 } from "lucide-react";
+import { getItemLabel } from "@/lib/demo-data";
 import {
-  NOTABLE_BUILDINGS,
-  CHERNARUS_ROADS,
-  NotableBuilding,
-  RoadRoute,
-  BuildingCategory,
-  RoadType,
-} from "@/lib/chernarus-landmarks";
+  type PvpZone,
+  type BaseRaidConfig,
+  loadPvpZones,
+  savePvpZones,
+  loadPvpRestrictedMode,
+  savePvpRestrictedMode,
+  loadBaseRaidConfig,
+  saveBaseRaidConfig,
+  generateInitPvpScript,
+  DEFAULT_PVP_ZONES,
+} from "@/lib/pvp-raid-manager";
 
 type MilitaryTier = "Tier 1" | "Tier 2" | "Tier 3" | "Tier 4" | "Zona Tóxica (Tier 4)";
 
@@ -848,6 +851,33 @@ type Marker = {
 
 const SIZE = 15360; // Chernarus world size in meters
 const KEY = "dayz-map-markers";
+const DEFAULT_MILITARY_ZONES_STORAGE_KEY = "dayz-military-zones-v2";
+
+function loadInitialMilitaryZones(): MilitaryZone[] {
+  try {
+    const raw = localStorage.getItem(DEFAULT_MILITARY_ZONES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const savedRadii = localStorage.getItem(DEFAULT_ZONE_RADIUS_STORAGE_KEY);
+    if (savedRadii) {
+      const overrides = JSON.parse(savedRadii);
+      return MILITARY_ZONES.map((z) => ({
+        ...z,
+        radius: overrides[z.id] !== undefined ? overrides[z.id] : z.radius,
+      }));
+    }
+  } catch {
+    /* ignore */
+  }
+  return MILITARY_ZONES;
+}
+
 
 // Cidades civis de Chernarus (coordenadas aproximadas)
 const CITIES: [name: string, x: number, z: number][] = [
@@ -893,11 +923,7 @@ export function MapPanel() {
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [selectedMilitaryZone, setSelectedMilitaryZone] = useState<MilitaryZone | null>(null);
-  const [selectedBuilding, setSelectedBuilding] = useState<NotableBuilding | null>(null);
-  const [selectedRoad, setSelectedRoad] = useState<RoadRoute | null>(null);
-  const [activeTab, setActiveTab] = useState<"military" | "buildings" | "roads" | "custom">(
-    "military",
-  );
+  const [activeTab, setActiveTab] = useState<"military" | "pvp" | "custom">("military");
   const [filter, setFilter] = useState<Set<Kind>>(new Set(KINDS));
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState<Kind | null>(null);
@@ -907,37 +933,43 @@ export function MapPanel() {
   const [showCities, setShowCities] = useState(false);
   const [showMilitaryZones, setShowMilitaryZones] = useState(true);
   const [showZoneRadii, setShowZoneRadii] = useState(true);
-  const [showBuildings, setShowBuildings] = useState(true);
-  const [showRoads, setShowRoads] = useState(true);
-  const [buildingCategoryFilter, setBuildingCategoryFilter] = useState<string>("ALL");
-  const [roadTypeFilter, setRoadTypeFilter] = useState<string>("ALL");
+  const [showPvpZones, setShowPvpZones] = useState(true);
   const [militaryTierFilter, setMilitaryTierFilter] = useState<string>("ALL");
-  const [mapMode, setMapMode] = useState<"topographic" | "satellite" | "nvg">(() => {
-    try {
-      const saved = localStorage.getItem("dayz-map-view-mode");
-      if (saved === "satellite" || saved === "nvg" || saved === "topographic") return saved;
-      return "topographic";
-    } catch {
-      return "topographic";
-    }
-  });
   const [hover, setHover] = useState<{ x: number; z: number } | null>(null);
+  const [mapStyle, setMapStyle] = useState<"topographic" | "satellite">("topographic");
+  const [ultraHd, setUltraHd] = useState<boolean>(true);
 
-  const handleSetMapMode = (mode: "topographic" | "satellite" | "nvg") => {
-    setMapMode(mode);
-    try {
-      localStorage.setItem("dayz-map-view-mode", mode);
-    } catch {
-      /* ignore */
-    }
-    if (mode === "satellite") {
-      toast.success("Modo Satélite de Alta Definição ativado!");
-    } else if (mode === "nvg") {
-      toast.info("Modo Visão Noturna (NVG) ativado!");
-    } else {
-      toast.info("Modo Topográfico oficial ativado");
-    }
-  };
+  // Zonas Militares Dinâmicas (Permite Mover, Alterar Raio, Excluir e Adicionar Novas)
+  const [militaryZones, setMilitaryZones] = useState<MilitaryZone[]>(() =>
+    loadInitialMilitaryZones(),
+  );
+  const [repositioningZone, setRepositioningZone] = useState<{
+    type: "pvp" | "military";
+    id: string;
+  } | null>(null);
+  const [addingMilitaryZone, setAddingMilitaryZone] = useState<boolean>(false);
+  const [showAddZoneModal, setShowAddZoneModal] = useState<"military" | "pvp" | null>(null);
+  const [newZoneForm, setNewZoneForm] = useState({
+    name: "",
+    shortName: "",
+    x: 7500,
+    z: 7500,
+    radius: 500,
+    tier: "Tier 3" as MilitaryTier,
+    zoneType: "Complexo Militar Principal" as MilitaryZoneType,
+    pvpType: "pvp_allowed" as "pvp_allowed" | "safezone",
+    description: "",
+  });
+
+  // Estados do Sistema de Zonas de PvP e PvE Protegido
+  const [pvpZones, setPvpZones] = useState<PvpZone[]>(() => loadPvpZones());
+  const [selectedPvpZoneId, setSelectedPvpZoneId] = useState<string | null>(null);
+  const [addingPvpZone, setAddingPvpZone] = useState<boolean>(false);
+  const [pvpRestrictedMode, setPvpRestrictedMode] = useState<boolean>(() =>
+    loadPvpRestrictedMode(),
+  );
+  const [showInitScriptModal, setShowInitScriptModal] = useState<boolean>(false);
+  const [raidConfig, setRaidConfig] = useState<BaseRaidConfig>(() => loadBaseRaidConfig());
 
   // Armazena itens e % de chance de spawn customizados por zona militar
   const [zoneLootOverrides, setZoneLootOverrides] = useState<Record<string, ZoneLootItem[]>>({});
@@ -1013,34 +1045,219 @@ export function MapPanel() {
     }
   }, []);
 
-  // Lista com as zonas militares aplicando os raios customizados dinâmicos
-  const effectiveMilitaryZones = useMemo(() => {
-    return MILITARY_ZONES.map((z) => ({
-      ...z,
-      radius: zoneRadiusOverrides[z.id] !== undefined ? zoneRadiusOverrides[z.id] : z.radius,
-    }));
-  }, [zoneRadiusOverrides]);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setRepositioningZone(null);
+        setAddingMilitaryZone(false);
+        setAddingPvpZone(false);
+        setShowAddZoneModal(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
-  // Zona selecionada atualizada em tempo real com as alterações de raio
+  const saveMilitaryZones = (zones: MilitaryZone[]) => {
+    setMilitaryZones(zones);
+    try {
+      localStorage.setItem(DEFAULT_MILITARY_ZONES_STORAGE_KEY, JSON.stringify(zones));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Lista com as zonas militares aplicando as modificações dinâmicas
+  const effectiveMilitaryZones = militaryZones;
+
+  // Zona selecionada atualizada em tempo real com as alterações de posição e raio
   const currentSelectedZone = useMemo(() => {
     if (!selectedMilitaryZone) return null;
     return (
-      effectiveMilitaryZones.find((z) => z.id === selectedMilitaryZone.id) ?? selectedMilitaryZone
+      militaryZones.find((z) => z.id === selectedMilitaryZone.id) ?? selectedMilitaryZone
     );
-  }, [selectedMilitaryZone, effectiveMilitaryZones]);
+  }, [selectedMilitaryZone, militaryZones]);
+
+  const currentSelectedPvpZone = useMemo(() => {
+    return pvpZones.find((z) => z.id === selectedPvpZoneId) ?? null;
+  }, [pvpZones, selectedPvpZoneId]);
+
+  const handleUpdateMilitaryZoneCoords = (zoneId: string, x: number, z: number) => {
+    const clampedX = Math.max(0, Math.min(SIZE, Math.round(x)));
+    const clampedZ = Math.max(0, Math.min(SIZE, Math.round(z)));
+    const updated = militaryZones.map((zone) =>
+      zone.id === zoneId ? { ...zone, x: clampedX, z: clampedZ } : zone,
+    );
+    saveMilitaryZones(updated);
+    toast.success(`Posição da zona militar atualizada: X: ${clampedX} · Z: ${clampedZ}!`, {
+      id: `coords-${zoneId}`,
+    });
+  };
+
+  const handleResetMilitaryZoneCoords = (zoneId: string) => {
+    const defaultZone = MILITARY_ZONES.find((z) => z.id === zoneId);
+    if (!defaultZone) return;
+    const updated = militaryZones.map((zone) =>
+      zone.id === zoneId ? { ...zone, x: defaultZone.x, z: defaultZone.z } : zone,
+    );
+    saveMilitaryZones(updated);
+    toast.success(`Posição original restaurada: X: ${defaultZone.x} · Z: ${defaultZone.z}!`);
+  };
+
+  const handleDeleteMilitaryZone = (zoneId: string) => {
+    const zoneToDelete = militaryZones.find((z) => z.id === zoneId);
+    const updated = militaryZones.filter((z) => z.id !== zoneId);
+    saveMilitaryZones(updated);
+    if (selectedMilitaryZone?.id === zoneId) {
+      setSelectedMilitaryZone(null);
+    }
+    toast.info(`Zona Militar "${zoneToDelete?.name ?? zoneId}" removida do mapa.`);
+  };
+
+  const handleResetAllMilitaryZones = () => {
+    saveMilitaryZones(MILITARY_ZONES);
+    setSelectedMilitaryZone(null);
+    toast.success(
+      "Todas as 25 zonas militares originais de Chernarus foram restauradas para as posições padrão!",
+    );
+  };
+
+  const handleAddMilitaryZone = (newZone: MilitaryZone) => {
+    const updated = [...militaryZones, newZone];
+    saveMilitaryZones(updated);
+    setSelectedMilitaryZone(newZone);
+    setActiveTab("military");
+    focusOnLocation(newZone.x, newZone.z, 2.5);
+    toast.success(`Nova zona militar "${newZone.name}" adicionada ao mapa!`);
+  };
+
+  const handleUpdatePvpZoneCoords = (id: string, x: number, z: number) => {
+    const clampedX = Math.max(0, Math.min(SIZE, Math.round(x)));
+    const clampedZ = Math.max(0, Math.min(SIZE, Math.round(z)));
+    const updated = pvpZones.map((z) =>
+      z.id === id ? { ...z, x: clampedX, z: clampedZ } : z,
+    );
+    setPvpZones(updated);
+    savePvpZones(updated);
+    toast.success(`Posição da Zona de PvP atualizada: X: ${clampedX} · Z: ${clampedZ}!`, {
+      id: `pvp-coords-${id}`,
+    });
+  };
+
+  const handleUpdatePvpZoneField = (id: string, patch: Partial<PvpZone>) => {
+    const updated = pvpZones.map((z) => (z.id === id ? { ...z, ...patch } : z));
+    setPvpZones(updated);
+    savePvpZones(updated);
+  };
+
+  // Dynamic Slippy Tile calculations for Ultra-HD Crispness at high zoom
+  const visibleTiles = useMemo(() => {
+    if (!ultraHd || zoom < 1.35) return [];
+
+    const tileZ = zoom >= 3.6 ? 6 : 5;
+    const numTiles = 1 << tileZ;
+
+    const w = viewportSize.width || 800;
+    const h = viewportSize.height || 680;
+
+    const minVisX = -pan.x;
+    const maxVisX = -pan.x + w;
+    const minVisY = -pan.y;
+    const maxVisY = -pan.y + h;
+
+    const normMinX = Math.max(0, minVisX / currentSize);
+    const normMaxX = Math.min(1, maxVisX / currentSize);
+    const normMinY = Math.max(0, minVisY / currentSize);
+    const normMaxY = Math.min(1, maxVisY / currentSize);
+
+    const tileMinX = Math.max(0, Math.floor(normMinX * numTiles) - 1);
+    const tileMaxX = Math.min(numTiles - 1, Math.floor(normMaxX * numTiles) + 1);
+    const tileMinY = Math.max(0, Math.floor(normMinY * numTiles) - 1);
+    const tileMaxY = Math.min(numTiles - 1, Math.floor(normMaxY * numTiles) + 1);
+
+    const tiles: { z: number; x: number; y: number; key: string }[] = [];
+    for (let ty = tileMinY; ty <= tileMaxY; ty++) {
+      for (let tx = tileMinX; tx <= tileMaxX; tx++) {
+        tiles.push({
+          z: tileZ,
+          x: tx,
+          y: ty,
+          key: `${tileZ}-${tx}-${ty}-${mapStyle}`,
+        });
+      }
+    }
+    return tiles;
+  }, [ultraHd, zoom, pan, currentSize, viewportSize, mapStyle]);
+
+  const handleUpdatePvpZoneRadius = (id: string, radius: number) => {
+    const clamped = Math.max(50, Math.min(5000, Math.round(radius)));
+    const updated = pvpZones.map((z) => (z.id === id ? { ...z, radius: clamped } : z));
+    setPvpZones(updated);
+    savePvpZones(updated);
+  };
+
+  const handleTogglePvpZone = (id: string) => {
+    const updated = pvpZones.map((z) => (z.id === id ? { ...z, enabled: !z.enabled } : z));
+    setPvpZones(updated);
+    savePvpZones(updated);
+    toast.success("Status da zona de PvP atualizado!");
+  };
+
+  const handleDeletePvpZone = (id: string) => {
+    const updated = pvpZones.filter((z) => z.id !== id);
+    setPvpZones(updated);
+    savePvpZones(updated);
+    if (selectedPvpZoneId === id) setSelectedPvpZoneId(null);
+    toast.info("Zona de PvP removida com sucesso!");
+  };
+
+  const handleToggleRestrictedPvp = (active: boolean) => {
+    setPvpRestrictedMode(active);
+    savePvpRestrictedMode(active);
+    if (active) {
+      toast.success(
+        "🛡️ Modo PvP Restrito ATIVADO: Fora das zonas marcadas, tiro em jogadores está BLOQUEADO!",
+      );
+    } else {
+      toast.info(
+        "⚔️ Modo PvP Livre (Vanilla): Tiro em jogadores permitido em qualquer lugar do mapa.",
+      );
+    }
+  };
+
+  const handleToggleRaidQuick = (active: boolean) => {
+    const next = { ...raidConfig, raidEnabled: active };
+    setRaidConfig(next);
+    saveBaseRaidConfig(next);
+    if (active) {
+      toast.success("💥 Raid de Bases ATIVADO: Danos em portões e paredes liberados!");
+    } else {
+      toast.info("🛡️ Raid de Bases DESATIVADO: Bases 100% protegidas contra danos!");
+    }
+  };
+
+  const handleAddPresetPvpZone = (preset: (typeof DEFAULT_PVP_ZONES)[0]) => {
+    if (pvpZones.some((z) => z.shortName === preset.shortName)) {
+      toast.info(`A zona ${preset.shortName} já está cadastrada!`);
+      focusOnLocation(preset.x, preset.z, 2.5);
+      setSelectedPvpZoneId(preset.id);
+      return;
+    }
+    const newZone: PvpZone = { ...preset, id: `pvp-${Date.now()}` };
+    const updated = [...pvpZones, newZone];
+    setPvpZones(updated);
+    savePvpZones(updated);
+    setSelectedPvpZoneId(newZone.id);
+    setActiveTab("pvp");
+    focusOnLocation(newZone.x, newZone.z, 2.5);
+    toast.success(`Zona de PvP "${newZone.name}" adicionada ao mapa!`);
+  };
 
   // Altera o raio (área) de uma zona militar (mínimo 50m, máximo 10.000m)
   const handleUpdateZoneRadius = (zoneId: string, newRadius: number) => {
     const clamped = Math.max(50, Math.min(10000, Math.round(newRadius)));
-    setZoneRadiusOverrides((prev) => {
-      const updated = { ...prev, [zoneId]: clamped };
-      try {
-        localStorage.setItem(DEFAULT_ZONE_RADIUS_STORAGE_KEY, JSON.stringify(updated));
-      } catch {
-        /* ignore */
-      }
-      return updated;
-    });
+    const updated = militaryZones.map((z) => (z.id === zoneId ? { ...z, radius: clamped } : z));
+    saveMilitaryZones(updated);
     toast.success(`Área da zona militar ajustada: raio de ${clamped}m!`, {
       id: `radius-${zoneId}`,
     });
@@ -1050,16 +1267,10 @@ export function MapPanel() {
   const handleResetZoneRadius = (zoneId: string) => {
     const defaultZone = MILITARY_ZONES.find((z) => z.id === zoneId);
     if (!defaultZone) return;
-    setZoneRadiusOverrides((prev) => {
-      const next = { ...prev };
-      delete next[zoneId];
-      try {
-        localStorage.setItem(DEFAULT_ZONE_RADIUS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
+    const updated = militaryZones.map((z) =>
+      z.id === zoneId ? { ...z, radius: defaultZone.radius } : z,
+    );
+    saveMilitaryZones(updated);
     toast.success(`Raio da zona restaurado para o padrão original (${defaultZone.radius}m)!`);
   };
 
@@ -1266,7 +1477,7 @@ export function MapPanel() {
       const delta = e.deltaY < 0 ? 0.25 : -0.25;
 
       setZoom((currZoom) => {
-        const nextZoom = Math.min(6, Math.max(1, +(currZoom + delta).toFixed(2)));
+        const nextZoom = Math.min(8, Math.max(1, +(currZoom + delta).toFixed(2)));
         if (nextZoom === currZoom) return currZoom;
 
         const w = el.clientWidth || 800;
@@ -1324,7 +1535,7 @@ export function MapPanel() {
 
   const handleZoomChange = (targetZoom: number) => {
     setZoom((currZoom) => {
-      const nextZoom = Math.min(6, Math.max(1, +targetZoom.toFixed(2)));
+      const nextZoom = Math.min(8, Math.max(1, +targetZoom.toFixed(2)));
       if (nextZoom === currZoom) return currZoom;
 
       const w = viewportSize.width || 800;
@@ -1356,7 +1567,7 @@ export function MapPanel() {
     const w = viewportSize.width || 800;
     const h = viewportSize.height || 680;
     const bSize = Math.max(w, h);
-    const newZoom = Math.min(6, Math.max(zoom, targetZoom));
+    const newZoom = Math.min(8, Math.max(zoom, targetZoom));
     const newSize = bSize * newZoom;
 
     const normX = worldX / SIZE;
@@ -1441,6 +1652,78 @@ export function MapPanel() {
       }
     }
 
+    if (!dragRef.current.hasMoved && repositioningZone) {
+      const p = toWorld(e.clientX, e.clientY);
+      if (repositioningZone.type === "military") {
+        handleUpdateMilitaryZoneCoords(repositioningZone.id, p.x, p.z);
+        const zTarget = militaryZones.find((z) => z.id === repositioningZone.id);
+        toast.success(
+          `📍 Zona Militar "${zTarget?.shortName ?? zTarget?.name ?? "Militar"}" movida para X:${p.x} Z:${p.z}!`,
+        );
+        focusOnLocation(p.x, p.z, Math.max(zoom, 2.5));
+      } else {
+        handleUpdatePvpZoneCoords(repositioningZone.id, p.x, p.z);
+        const zTarget = pvpZones.find((z) => z.id === repositioningZone.id);
+        toast.success(
+          `📍 Zona de PvP "${zTarget?.shortName ?? zTarget?.name ?? "PvP"}" movida para X:${p.x} Z:${p.z}!`,
+        );
+        focusOnLocation(p.x, p.z, Math.max(zoom, 2.5));
+      }
+      setRepositioningZone(null);
+      return;
+    }
+
+    if (!dragRef.current.hasMoved && addingMilitaryZone) {
+      const p = toWorld(e.clientX, e.clientY);
+      const newZone: MilitaryZone = {
+        id: `custom-mil-${Date.now()}`,
+        name: `Zona Militar Nova ${militaryZones.length + 1}`,
+        shortName: `Base ${militaryZones.length + 1}`,
+        x: p.x,
+        z: p.z,
+        radius: 500,
+        tier: "Tier 3",
+        zoneType: "Complexo Militar Principal",
+        pvpDanger: "Alto Risco",
+        description: `Zona militar personalizada posicionada em X:${p.x} Z:${p.z}.`,
+        structures: ["Quartel Militar", "Guaritas de Perímetro", "Paiol de Armas"],
+        keyLoot: ["Fuzis de Assalto", "Coletes Táticos", "Munições", "Mochilas Militares"],
+      };
+      handleAddMilitaryZone(newZone);
+      setAddingMilitaryZone(false);
+      return;
+    }
+
+    if (!dragRef.current.hasMoved && addingPvpZone) {
+      const p = toWorld(e.clientX, e.clientY);
+      const newZone: PvpZone = {
+        id: `pvp-${Date.now()}`,
+        name: `Zona de PvP ${pvpZones.length + 1}`,
+        shortName: `PVP ${pvpZones.length + 1}`,
+        type: "pvp_allowed",
+        x: p.x,
+        z: p.z,
+        radius: 750,
+        enabled: true,
+        schedule: "always",
+        enterNotification: `⚠️ ATENÇÃO: Você entrou na Zona de PVP! Combate liberado!`,
+        exitNotification: "🛡️ SEGURO: Você saiu da Zona de PVP! Dano entre jogadores DESATIVADO.",
+        blockBulletDamageOutside: true,
+        blockMeleeDamageOutside: true,
+        color: "#ef4444",
+      };
+      const updated = [...pvpZones, newZone];
+      setPvpZones(updated);
+      savePvpZones(updated);
+      setSelectedPvpZoneId(newZone.id);
+      setSelectedMilitaryZone(null);
+      setSel(null);
+      setActiveTab("pvp");
+      setAddingPvpZone(false);
+      toast.success(`Zona de PvP "${newZone.name}" programada em X:${p.x} Z:${p.z}!`);
+      return;
+    }
+
     if (!dragRef.current.hasMoved && adding) {
       const p = toWorld(e.clientX, e.clientY);
       const m: Marker = {
@@ -1500,42 +1783,6 @@ export function MapPanel() {
     });
   }, [effectiveMilitaryZones, militaryTierFilter, search]);
 
-  const visibleBuildings = useMemo(() => {
-    return NOTABLE_BUILDINGS.filter((b) => {
-      if (buildingCategoryFilter !== "ALL" && b.category !== buildingCategoryFilter) {
-        return false;
-      }
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        b.name.toLowerCase().includes(q) ||
-        b.shortName.toLowerCase().includes(q) ||
-        b.city.toLowerCase().includes(q) ||
-        b.category.toLowerCase().includes(q) ||
-        b.description.toLowerCase().includes(q) ||
-        b.lootProfile.toLowerCase().includes(q)
-      );
-    });
-  }, [buildingCategoryFilter, search]);
-
-  const visibleRoads = useMemo(() => {
-    return CHERNARUS_ROADS.filter((r) => {
-      if (roadTypeFilter !== "ALL" && r.type !== roadTypeFilter) {
-        return false;
-      }
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        r.name.toLowerCase().includes(q) ||
-        r.shortName.toLowerCase().includes(q) ||
-        r.destinations.toLowerCase().includes(q) ||
-        r.type.toLowerCase().includes(q) ||
-        r.surface.toLowerCase().includes(q) ||
-        r.description.toLowerCase().includes(q)
-      );
-    });
-  }, [roadTypeFilter, search]);
-
   const cur = markers.find((m) => m.id === sel);
 
   const exportJson = () => {
@@ -1592,127 +1839,6 @@ export function MapPanel() {
     setSelectedMilitaryZone(null);
     setActiveTab("custom");
     toast.success(`Marcador de Zona criado em seus marcadores!`);
-  };
-
-  const convertBuildingToMarker = (b: NotableBuilding) => {
-    const newMarker: Marker = {
-      id: crypto.randomUUID(),
-      name: b.name,
-      kind: "Ponto de interesse",
-      x: b.x,
-      z: b.z,
-      owner: "",
-      members: "",
-      notes: `${b.category} em ${b.city}. Rooftop: ${b.hasRooftop ? "Sim" : "Não"}. Loot: ${b.lootProfile}. ${b.description}`,
-      created: new Date().toLocaleDateString("pt-BR"),
-    };
-    save([...markers, newMarker]);
-    setSel(newMarker.id);
-    setSelectedBuilding(null);
-    setSelectedMilitaryZone(null);
-    setSelectedRoad(null);
-    setActiveTab("custom");
-    toast.success(`Marcador de "${b.name}" adicionado aos seus marcadores!`);
-  };
-
-  const convertRoadToMarker = (r: RoadRoute) => {
-    const midPoint = r.points[Math.floor(r.points.length / 2)] || r.points[0];
-    const newMarker: Marker = {
-      id: crypto.randomUUID(),
-      name: r.name,
-      kind: "Ponto de interesse",
-      x: midPoint[0],
-      z: midPoint[1],
-      owner: "",
-      members: "",
-      notes: `${r.type} (${r.surface}). Perigo: ${r.dangerLevel}. Destinos: ${r.destinations}. ${r.description}`,
-      created: new Date().toLocaleDateString("pt-BR"),
-    };
-    save([...markers, newMarker]);
-    setSel(newMarker.id);
-    setSelectedRoad(null);
-    setSelectedBuilding(null);
-    setSelectedMilitaryZone(null);
-    setActiveTab("custom");
-    toast.success(`Marcador da rota "${r.shortName}" adicionado aos seus marcadores!`);
-  };
-
-  const getBuildingCategoryStyle = (category: BuildingCategory) => {
-    switch (category) {
-      case "Hospital":
-        return {
-          bg: "bg-rose-600",
-          border: "border-rose-300",
-          text: "text-rose-400",
-          badge: "bg-rose-950/90 text-rose-300 border-rose-700",
-          glow: "shadow-[0_0_12px_rgba(244,63,94,0.7)]",
-          Icon: HeartPulse,
-        };
-      case "Polícia":
-        return {
-          bg: "bg-blue-600",
-          border: "border-blue-300",
-          text: "text-blue-400",
-          badge: "bg-blue-950/90 text-blue-300 border-blue-700",
-          glow: "shadow-[0_0_12px_rgba(59,130,246,0.7)]",
-          Icon: Shield,
-        };
-      case "Bombeiros":
-        return {
-          bg: "bg-amber-600",
-          border: "border-amber-300",
-          text: "text-amber-400",
-          badge: "bg-amber-950/90 text-amber-300 border-amber-700",
-          glow: "shadow-[0_0_12px_rgba(245,158,11,0.7)]",
-          Icon: Flame,
-        };
-      case "Castelo":
-        return {
-          bg: "bg-purple-600",
-          border: "border-purple-300",
-          text: "text-purple-400",
-          badge: "bg-purple-950/90 text-purple-300 border-purple-700",
-          glow: "shadow-[0_0_12px_rgba(168,85,247,0.7)]",
-          Icon: Castle,
-        };
-      case "Torre/Radar":
-        return {
-          bg: "bg-cyan-600",
-          border: "border-cyan-300",
-          text: "text-cyan-400",
-          badge: "bg-cyan-950/90 text-cyan-300 border-cyan-700",
-          glow: "shadow-[0_0_12px_rgba(6,182,212,0.7)]",
-          Icon: Radio,
-        };
-      case "Industrial":
-        return {
-          bg: "bg-orange-600",
-          border: "border-orange-300",
-          text: "text-orange-400",
-          badge: "bg-orange-950/90 text-orange-300 border-orange-700",
-          glow: "shadow-[0_0_12px_rgba(234,88,12,0.7)]",
-          Icon: Factory,
-        };
-      case "Hangar/Aéreo":
-        return {
-          bg: "bg-indigo-600",
-          border: "border-indigo-300",
-          text: "text-indigo-400",
-          badge: "bg-indigo-950/90 text-indigo-300 border-indigo-700",
-          glow: "shadow-[0_0_12px_rgba(99,102,241,0.7)]",
-          Icon: Navigation,
-        };
-      case "Marco Costeiro":
-      default:
-        return {
-          bg: "bg-teal-600",
-          border: "border-teal-300",
-          text: "text-teal-400",
-          badge: "bg-teal-950/90 text-teal-300 border-teal-700",
-          glow: "shadow-[0_0_12px_rgba(20,184,166,0.7)]",
-          Icon: Milestone,
-        };
-    }
   };
 
   const getTierColor = (tier: MilitaryTier) => {
@@ -1854,34 +1980,6 @@ export function MapPanel() {
               </button>
             )}
 
-            {/* Toggle de Prédios e Estruturas Notáveis */}
-            <button
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-medium ${
-                showBuildings
-                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm"
-                  : "btn-ghost opacity-60"
-              }`}
-              onClick={() => setShowBuildings((s) => !s)}
-              title="Exibir ou ocultar hospitais, delegacias, bombeiros, castelos, torres de rádio e hangares"
-            >
-              <Building2 className="size-3.5 text-cyan-400" />
-              <span>Prédios ({NOTABLE_BUILDINGS.length})</span>
-            </button>
-
-            {/* Toggle de Estradas e Linhas Férreas */}
-            <button
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-medium ${
-                showRoads
-                  ? "bg-orange-500/20 text-orange-300 border border-orange-500/50 shadow-sm"
-                  : "btn-ghost opacity-60"
-              }`}
-              onClick={() => setShowRoads((s) => !s)}
-              title="Exibir ou ocultar rodovias asfaltadas, rotas secundárias e linhas de trem no mapa"
-            >
-              <Route className="size-3.5 text-orange-400" />
-              <span>Estradas ({CHERNARUS_ROADS.length})</span>
-            </button>
-
             {/* Toggle de Cidades */}
             <button
               className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors ${
@@ -1892,6 +1990,95 @@ export function MapPanel() {
             >
               <Building2 className="size-3.5" />
               <span>Cidades ({CITIES.length})</span>
+            </button>
+
+            {/* Alternador de Estilo do Mapa Oficial DayZ: Topográfico vs Satélite */}
+            <div className="flex items-center rounded-sm border border-border/80 bg-secondary/50 p-0.5 text-xs">
+              <button
+                className={`px-2 py-0.5 rounded-xs font-medium transition-colors ${
+                  mapStyle === "topographic"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setMapStyle("topographic")}
+                title="Mapa Topográfico Oficial do DayZ (com curvas de nível, estradas, trilhas e relevo)"
+              >
+                🗺️ Topográfico
+              </button>
+              <button
+                className={`px-2 py-0.5 rounded-xs font-medium transition-colors ${
+                  mapStyle === "satellite"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setMapStyle("satellite")}
+                title="Mapa Satélite Oficial do DayZ (vista aérea foto-realista da vegetação e relevo)"
+              >
+                🛰️ Satélite
+              </button>
+            </div>
+
+            {/* Toggle de Zonas de PvP e Safezones */}
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-medium ${
+                showPvpZones
+                  ? "bg-red-500/20 text-red-300 border border-red-500/50 shadow-sm font-semibold"
+                  : "btn-ghost opacity-60"
+              }`}
+              onClick={() => setShowPvpZones((s) => !s)}
+              title="Exibir ou ocultar zonas de PvP e combate liberado no mapa"
+            >
+              <Swords className="size-3.5 text-red-400" />
+              <span>Zonas de PvP ({pvpZones.length})</span>
+            </button>
+
+            {/* Alternador de Modo Ultra-HD Dinâmico (Nitidez Máxima de Zoom) */}
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-medium ${
+                ultraHd
+                  ? "bg-sky-500/20 text-sky-300 border border-sky-500/50 shadow-sm font-semibold"
+                  : "btn-ghost opacity-60"
+              }`}
+              onClick={() => {
+                setUltraHd((u) => !u);
+                toast.info(
+                  ultraHd
+                    ? "Modo Ultra-HD desativado"
+                    : "⚡ Modo Ultra-HD Dinâmico ativado! Nitidez máxima preservada ao dar zoom.",
+                );
+              }}
+              title="Preserva nitidez máxima e alta definição de imagem ao dar zoom no mapa"
+            >
+              <Zap className="size-3.5 text-sky-400" />
+              <span>Ultra-HD {ultraHd ? "Ativo" : "Off"}</span>
+            </button>
+
+            {/* Botão Rápido de Raid de Bases (Ativar / Desativar Danos) */}
+            <button
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-bold border ${
+                raidConfig.raidEnabled
+                  ? "bg-amber-500/25 text-amber-300 border-amber-500 shadow-sm animate-pulse"
+                  : "bg-emerald-500/20 text-emerald-300 border-emerald-500/60"
+              }`}
+              onClick={() => handleToggleRaidQuick(!raidConfig.raidEnabled)}
+              title="Ativar ou desativar dano em estruturas de base (Raid) no servidor"
+            >
+              {raidConfig.raidEnabled ? (
+                <Bomb className="size-3.5 text-amber-400" />
+              ) : (
+                <Shield className="size-3.5 text-emerald-400" />
+              )}
+              <span>Raid: {raidConfig.raidEnabled ? "Ativado" : "Desativado"}</span>
+            </button>
+
+            {/* Gerador de Script init.c */}
+            <button
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-sm transition-colors font-semibold bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30"
+              onClick={() => setShowInitScriptModal(true)}
+              title="Gerar script de init.c para o servidor com proteção de PvP e Raid"
+            >
+              <FileCode className="size-3.5 text-primary" />
+              <span>Código init.c</span>
             </button>
 
             <div className="h-4 w-px bg-border/80 mx-0.5 hidden sm:block" />
@@ -1909,48 +2096,6 @@ export function MapPanel() {
             >
               <Percent className="size-3.5 text-emerald-400" />
               <span>Chance de Drop (%)</span>
-            </button>
-          </div>
-
-          {/* Seletor do Modo de Mapa: Topográfico vs Satélite */}
-          <div className="flex items-center gap-1 bg-secondary/50 p-1 rounded-sm border border-border/50">
-            <span className="text-[11px] font-semibold text-muted-foreground mr-1 hidden sm:inline">
-              Mapa:
-            </span>
-            <button
-              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-xs font-semibold transition-all ${
-                mapMode === "topographic"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "btn-ghost opacity-70 hover:opacity-100"
-              }`}
-              onClick={() => handleSetMapMode("topographic")}
-              title="Mapa Topográfico e Tático oficial de Chernarus"
-            >
-              <Compass className="size-3" />
-              <span>Topográfico</span>
-            </button>
-            <button
-              className={`flex items-center gap-1.5 px-2.5 py-0.5 text-xs rounded-xs font-semibold transition-all ${
-                mapMode === "satellite"
-                  ? "bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-300 font-bold"
-                  : "btn-ghost text-emerald-400 hover:bg-emerald-500/10"
-              }`}
-              onClick={() => handleSetMapMode("satellite")}
-              title="Mudar para Mapa de Satélite (Fotografia orbital de alta definição de Chernarus)"
-            >
-              <Satellite className="size-3.5" />
-              <span>Satélite</span>
-            </button>
-            <button
-              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-xs font-semibold transition-all ${
-                mapMode === "nvg"
-                  ? "bg-green-700 text-white shadow-xs ring-1 ring-green-300"
-                  : "btn-ghost text-green-400 hover:bg-green-500/10 hidden md:flex"
-              }`}
-              onClick={() => handleSetMapMode("nvg")}
-              title="Visão Noturna Tática (NVG) para operações noturnas"
-            >
-              <span>🌙 NVG</span>
             </button>
           </div>
 
@@ -2037,73 +2182,6 @@ export function MapPanel() {
           </div>
         )}
 
-        {/* Barra de Filtro de Prédios quando a camada de prédios estiver ativa */}
-        {showBuildings && (
-          <div className="flex flex-wrap items-center gap-1 bg-cyan-950/20 p-1.5 rounded-sm border border-cyan-500/30 text-xs">
-            <span className="text-[11px] font-semibold text-cyan-300 mr-1 flex items-center gap-1">
-              <Building2 className="size-3 text-cyan-400" /> Categorias de Prédios:
-            </span>
-            {[
-              { id: "ALL", label: `Todos (${NOTABLE_BUILDINGS.length})` },
-              { id: "Hospital", label: "Hospitais (6)", color: "text-rose-400" },
-              { id: "Polícia", label: "Polícia (5)", color: "text-blue-400" },
-              { id: "Bombeiros", label: "Bombeiros (5)", color: "text-amber-400" },
-              { id: "Castelo", label: "Castelos (4)", color: "text-purple-400" },
-              { id: "Torre/Radar", label: "Torre/Radar (3)", color: "text-cyan-400" },
-              { id: "Industrial", label: "Industrial (4)", color: "text-orange-400" },
-              { id: "Hangar/Aéreo", label: "Hangares (5)", color: "text-indigo-400" },
-              { id: "Marco Costeiro", label: "Marcos (3)", color: "text-teal-400" },
-            ].map((cat) => (
-              <button
-                key={cat.id}
-                className={`px-2 py-0.5 rounded-sm transition-all ${
-                  buildingCategoryFilter === cat.id
-                    ? "bg-cyan-600 text-white font-semibold shadow-xs"
-                    : `btn-ghost hover:bg-cyan-900/30 ${cat.color ?? "text-muted-foreground"}`
-                }`}
-                onClick={() => setBuildingCategoryFilter(cat.id)}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Barra de Filtro de Estradas e Rotas quando a camada de estradas estiver ativa */}
-        {showRoads && (
-          <div className="flex flex-wrap items-center gap-1 bg-orange-950/20 p-1.5 rounded-sm border border-orange-500/30 text-xs">
-            <span className="text-[11px] font-semibold text-orange-300 mr-1 flex items-center gap-1">
-              <Route className="size-3 text-orange-400" /> Estradas & Linhas:
-            </span>
-            {[
-              { id: "ALL", label: `Todas as Vias (${CHERNARUS_ROADS.length})` },
-              { id: "Rodovia Principal", label: "Rodovias Asfalto (4)", color: "text-amber-400" },
-              {
-                id: "Estrada Secundária",
-                label: "Rotas Secundárias (1)",
-                color: "text-yellow-400",
-              },
-              {
-                id: "Linha Férrea (Trem)",
-                label: "Linha Férrea / Trem (1)",
-                color: "text-red-400",
-              },
-            ].map((rt) => (
-              <button
-                key={rt.id}
-                className={`px-2 py-0.5 rounded-sm transition-all ${
-                  roadTypeFilter === rt.id
-                    ? "bg-orange-600 text-white font-semibold shadow-xs"
-                    : `btn-ghost hover:bg-orange-900/30 ${rt.color ?? "text-muted-foreground"}`
-                }`}
-                onClick={() => setRoadTypeFilter(rt.id)}
-              >
-                {rt.label}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* Criar Marcador Personalizado */}
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-muted-foreground">Novo Marcador:</span>
@@ -2130,7 +2208,11 @@ export function MapPanel() {
         <div
           ref={containerRef}
           className={`relative h-[650px] md:h-[720px] w-full overflow-hidden rounded-sm border border-border bg-[#10242e] shadow-inner select-none touch-none ${
-            adding ? "cursor-crosshair" : isDragging ? "cursor-grabbing" : "cursor-grab"
+            repositioningZone || addingMilitaryZone || addingPvpZone || adding
+              ? "cursor-crosshair"
+              : isDragging
+                ? "cursor-grabbing"
+                : "cursor-grab"
           }`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -2140,7 +2222,57 @@ export function MapPanel() {
             setHover(null);
           }}
         >
-          {/* Barra Flutuante de Ajuste Rápido de Área da Zona Militar no Mapa */}
+          {/* Banner Flutuante de Modo Reposicionamento ou Adicionar */}
+          {repositioningZone && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-card/95 border-2 border-primary px-3.5 py-1.5 rounded-md shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-2 pointer-events-auto">
+              <div className="p-1 rounded-full bg-primary/20 text-primary animate-bounce">
+                <MapPin className="size-4" />
+              </div>
+              <div className="text-xs">
+                <div className="font-bold text-foreground flex items-center gap-1.5">
+                  <span>Mudar Posição:</span>
+                  <span className="text-primary font-bold">
+                    {repositioningZone.type === "military"
+                      ? militaryZones.find((z) => z.id === repositioningZone.id)?.shortName ??
+                        "Zona Militar"
+                      : pvpZones.find((z) => z.id === repositioningZone.id)?.shortName ??
+                        "Zona de PvP"}
+                  </span>
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  Clique em qualquer lugar do mapa de Chernarus para reposicionar
+                </span>
+              </div>
+              <button
+                className="btn-ghost text-xs px-2 py-0.5 border border-border/70 ml-1.5 hover:bg-secondary font-medium"
+                onClick={() => setRepositioningZone(null)}
+              >
+                Cancelar (ESC)
+              </button>
+            </div>
+          )}
+
+          {addingMilitaryZone && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 bg-card/95 border-2 border-amber-500 px-3.5 py-1.5 rounded-md shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-2 pointer-events-auto">
+              <div className="p-1 rounded-full bg-amber-500/20 text-amber-400 animate-bounce">
+                <ShieldAlert className="size-4" />
+              </div>
+              <div className="text-xs">
+                <div className="font-bold text-amber-300">Nova Zona Militar / Loot</div>
+                <span className="text-[10px] text-muted-foreground">
+                  Clique em qualquer lugar do mapa para posicionar a nova zona militar
+                </span>
+              </div>
+              <button
+                className="btn-ghost text-xs px-2 py-0.5 border border-border/70 ml-1.5 hover:bg-secondary font-medium"
+                onClick={() => setAddingMilitaryZone(false)}
+              >
+                Cancelar (ESC)
+              </button>
+            </div>
+          )}
+
+          {/* Barra Flutuante de Ajuste Rápido de Área e Posição da Zona Militar no Mapa */}
           {currentSelectedZone && (
             <div
               className="absolute top-3 left-3 z-30 flex flex-wrap items-center gap-2 rounded-sm bg-card/95 px-3 py-1.5 shadow-2xl backdrop-blur-md border border-amber-500/50 text-xs pointer-events-auto animate-in fade-in-50"
@@ -2149,18 +2281,37 @@ export function MapPanel() {
               <div className="flex items-center gap-1.5">
                 <ShieldAlert className="size-3.5 text-amber-400 shrink-0" />
                 <span className="font-bold text-foreground">{currentSelectedZone.shortName}</span>
-                <span className="text-muted-foreground text-[11px]">Raio:</span>
-                <span className="font-mono font-bold text-amber-400 text-xs">
-                  {currentSelectedZone.radius}m
+                <span className="text-muted-foreground text-[10px] font-mono">
+                  X:{currentSelectedZone.x} Z:{currentSelectedZone.z}
                 </span>
-                <span className="text-[10px] text-muted-foreground font-mono hidden sm:inline">
-                  (~{(Math.PI * Math.pow(currentSelectedZone.radius / 1000, 2)).toFixed(2)} km²)
+                <span className="font-mono font-bold text-amber-400 text-xs">
+                  r={currentSelectedZone.radius}m
                 </span>
               </div>
 
               <div className="h-4 w-px bg-border/80 mx-0.5 hidden sm:block" />
 
               <div className="flex items-center gap-1">
+                {/* Botão de Reposicionar no Mapa */}
+                <button
+                  className={`btn-ghost h-6 px-2 text-[11px] font-bold border flex items-center gap-1 ${
+                    repositioningZone?.id === currentSelectedZone.id
+                      ? "bg-amber-500 text-black border-amber-400 animate-pulse"
+                      : "border-amber-500/40 text-amber-300 hover:bg-amber-500/15"
+                  }`}
+                  onClick={() =>
+                    setRepositioningZone((cur) =>
+                      cur?.id === currentSelectedZone.id
+                        ? null
+                        : { type: "military", id: currentSelectedZone.id },
+                    )
+                  }
+                  title="Clique no mapa para reposicionar o centro desta zona"
+                >
+                  <LocateFixed className="size-3" />
+                  {repositioningZone?.id === currentSelectedZone.id ? "Clique..." : "Mover"}
+                </button>
+
                 <span className="text-[10px] text-muted-foreground mr-0.5 hidden md:inline">
                   Área:
                 </span>
@@ -2200,15 +2351,6 @@ export function MapPanel() {
                 >
                   + 100m
                 </button>
-                <button
-                  className="btn-ghost h-6 px-1.5 text-[11px] font-bold border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15 hidden sm:inline-flex"
-                  onClick={() =>
-                    handleUpdateZoneRadius(currentSelectedZone.id, currentSelectedZone.radius + 250)
-                  }
-                  title="Aumentar área em 250 metros"
-                >
-                  + 250m
-                </button>
 
                 {/* Reset para o original se alterado */}
                 {(() => {
@@ -2225,6 +2367,15 @@ export function MapPanel() {
                     </button>
                   );
                 })()}
+
+                {/* Botão de Excluir / Tirar Zona Militar */}
+                <button
+                  className="btn-danger size-6 p-0 text-xs ml-1"
+                  onClick={() => handleDeleteMilitaryZone(currentSelectedZone.id)}
+                  title="Excluir / Tirar Zona Militar do Mapa"
+                >
+                  <Trash2 className="size-3" />
+                </button>
               </div>
             </div>
           )}
@@ -2241,51 +2392,47 @@ export function MapPanel() {
             }}
           >
             <img
-              src={mapImg}
-              alt="Mapa Oficial de Chernarus"
-              width={1536}
-              height={1536}
-              className={`size-full select-none pointer-events-none object-cover transition-[filter] duration-300 ${
-                mapMode === "satellite"
-                  ? "contrast-[1.28] saturate-[1.48] brightness-[0.92] hue-rotate-[-6deg]"
-                  : mapMode === "nvg"
-                    ? "contrast-[1.4] saturate-[0.1] brightness-[0.88] sepia-[1] hue-rotate-[85deg]"
-                    : "contrast-[1.04] saturate-[1.05]"
-              }`}
+              src={mapStyle === "satellite" ? mapImgSat : mapImg}
+              alt="Mapa Oficial DayZ Chernarus+"
+              width={4096}
+              height={4096}
+              className="size-full select-none pointer-events-none object-cover"
+              style={{
+                imageRendering: "auto",
+                WebkitBackfaceVisibility: "hidden",
+                backfaceVisibility: "hidden",
+                transform: "translateZ(0)",
+              }}
               draggable={false}
             />
 
-            {/* Efeito Visual do Modo Satélite (Contraste Aéreo e Atmosfera Orbital) */}
-            {mapMode === "satellite" && (
-              <>
-                <div
-                  className="pointer-events-none absolute inset-0 mix-blend-color-burn opacity-25"
-                  style={{
-                    background:
-                      "radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.15) 0%, rgba(15, 23, 42, 0.45) 100%)",
-                  }}
-                />
-                <div
-                  className="pointer-events-none absolute inset-0 opacity-10"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)",
-                    backgroundSize: "2.5% 2.5%",
-                  }}
-                />
-              </>
-            )}
-
-            {/* Efeito Visual do Modo NVG (Visão Noturna Fosforosa) */}
-            {mapMode === "nvg" && (
-              <div
-                className="pointer-events-none absolute inset-0 mix-blend-screen opacity-20"
-                style={{
-                  backgroundImage:
-                    "repeating-linear-gradient(0deg, rgba(34, 197, 94, 0.25) 0px, rgba(34, 197, 94, 0.25) 1px, transparent 1px, transparent 3px)",
-                }}
-              />
-            )}
+            {/* Camada Dinâmica Slippy Tiles Ultra-HD (Nitidez máxima sem perda de qualidade ao dar zoom) */}
+            {ultraHd &&
+              visibleTiles.map((t) => {
+                const numTiles = 1 << t.z;
+                const styleFolder =
+                  mapStyle === "satellite" ? "ChernarusPlus-Sat" : "ChernarusPlus-Top";
+                return (
+                  <img
+                    key={t.key}
+                    src={`https://maps.izurvive.com/maps/${styleFolder}/1.25.0/tiles/${t.z}/${t.x}/${t.y}.webp`}
+                    alt=""
+                    width={256}
+                    height={256}
+                    className="pointer-events-none absolute select-none"
+                    style={{
+                      left: `${(t.x / numTiles) * 100}%`,
+                      top: `${(t.y / numTiles) * 100}%`,
+                      width: `${(1 / numTiles) * 100}%`,
+                      height: `${(1 / numTiles) * 100}%`,
+                      imageRendering: "auto",
+                      WebkitBackfaceVisibility: "hidden",
+                    }}
+                    draggable={false}
+                    loading="eager"
+                  />
+                );
+              })}
 
             {/* Grade Tática de Coordenadas */}
             <div
@@ -2296,181 +2443,6 @@ export function MapPanel() {
                 backgroundSize: "10% 10%",
               }}
             />
-
-            {/* Camada de Estradas e Linhas Férreas de Chernarus (SVG Interativo 1:1) */}
-            {showRoads && (
-              <svg
-                viewBox="0 0 15360 15360"
-                className="absolute inset-0 size-full pointer-events-none z-[4]"
-                style={{ overflow: "visible" }}
-              >
-                <defs>
-                  <filter id="road-glow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="40" result="blur" />
-                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                  </filter>
-                </defs>
-                {visibleRoads.map((r) => {
-                  const isSelected = selectedRoad?.id === r.id;
-                  const isRailway = r.type === "Linha Férrea (Trem)";
-                  const isSecondary = r.type === "Estrada Secundária";
-                  const ptsString = r.points.map(([px, pz]) => `${px},${15360 - pz}`).join(" ");
-
-                  return (
-                    <g key={r.id}>
-                      {/* Hitbox transparente para clique direto no mapa */}
-                      <polyline
-                        points={ptsString}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth={zoom > 2 ? "260" : "420"}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="pointer-events-auto cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedRoad(r);
-                          setSelectedBuilding(null);
-                          setSelectedMilitaryZone(null);
-                          setSel(null);
-                          setActiveTab("roads");
-                          toast.info(`Estrada selecionada: ${r.name}`);
-                        }}
-                      />
-
-                      {/* Linha externa de contraste (borda escura) */}
-                      <polyline
-                        points={ptsString}
-                        fill="none"
-                        stroke={isSelected ? "#ffffff" : "#020617"}
-                        strokeWidth={
-                          isSelected ? "110" : isRailway ? "75" : isSecondary ? "65" : "95"
-                        }
-                        strokeOpacity={isSelected ? "0.95" : "0.75"}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="pointer-events-none"
-                      />
-
-                      {/* Linha colorida temática da rota */}
-                      <polyline
-                        points={ptsString}
-                        fill="none"
-                        stroke={r.color}
-                        strokeWidth={
-                          isSelected ? "80" : isRailway ? "45" : isSecondary ? "40" : "60"
-                        }
-                        strokeDasharray={isRailway ? "150 110" : isSecondary ? "90 60" : undefined}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        filter={isSelected ? "url(#road-glow)" : undefined}
-                        className="pointer-events-none transition-all"
-                      />
-                    </g>
-                  );
-                })}
-              </svg>
-            )}
-
-            {/* Rótulos e Marcadores das Estradas ao longo do trajeto */}
-            {showRoads &&
-              visibleRoads.map((r) => {
-                const isSelected = selectedRoad?.id === r.id;
-                const midIdx = Math.floor(r.points.length / 2);
-                const [midX, midZ] = r.points[midIdx] || r.points[0];
-                const isRailway = r.type === "Linha Férrea (Trem)";
-
-                return (
-                  <button
-                    key={`road-label-${r.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedRoad(r);
-                      setSelectedBuilding(null);
-                      setSelectedMilitaryZone(null);
-                      setSel(null);
-                      setActiveTab("roads");
-                    }}
-                    className={`group absolute -translate-x-1/2 -translate-y-1/2 transition-transform focus:outline-none z-[5] ${
-                      isSelected ? "scale-115 z-20" : "hover:scale-110"
-                    }`}
-                    style={{
-                      left: `${(midX / SIZE) * 100}%`,
-                      top: `${(1 - midZ / SIZE) * 100}%`,
-                    }}
-                    title={`${r.name} (${r.type})\n${r.destinations}\nClique para ver detalhes`}
-                  >
-                    <div
-                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded-xs text-[9px] font-bold shadow-md backdrop-blur-sm border transition-all ${
-                        isSelected
-                          ? "bg-amber-500 text-black border-white ring-2 ring-amber-300"
-                          : "bg-background/90 text-foreground border-border/80 hover:border-amber-400"
-                      }`}
-                    >
-                      {isRailway ? (
-                        <Train className="size-2.5 text-red-400" />
-                      ) : (
-                        <Route className="size-2.5 text-amber-400" />
-                      )}
-                      <span>{r.shortName}</span>
-                    </div>
-                  </button>
-                );
-              })}
-
-            {/* Pinos Táticos de Prédios e Estruturas Notáveis */}
-            {showBuildings &&
-              visibleBuildings.map((b) => {
-                const isSelected = selectedBuilding?.id === b.id;
-                const style = getBuildingCategoryStyle(b.category);
-                const CategoryIcon = style.Icon;
-
-                return (
-                  <button
-                    key={b.id}
-                    title={`${b.name} (${b.category} em ${b.city})\nLoot: ${b.lootProfile}\n${
-                      b.hasRooftop ? "🎯 Acesso ao Telhado (Sniper)" : ""
-                    }\nClique para ver detalhes`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedBuilding(b);
-                      setSelectedMilitaryZone(null);
-                      setSelectedRoad(null);
-                      setSel(null);
-                      setActiveTab("buildings");
-                    }}
-                    className={`group absolute -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-125 focus:outline-none z-10 ${
-                      isSelected ? "scale-125 z-20" : ""
-                    }`}
-                    style={{ left: `${(b.x / SIZE) * 100}%`, top: `${(1 - b.z / SIZE) * 100}%` }}
-                  >
-                    <div
-                      className={`relative flex items-center justify-center size-5 rounded-sm ${style.bg} ${
-                        isSelected
-                          ? "ring-2 ring-white ring-offset-2 ring-offset-black"
-                          : `border ${style.border}`
-                      } ${style.glow} text-white`}
-                    >
-                      <CategoryIcon className="size-3" />
-
-                      {/* Tag do Nome do Prédio, Categoria e Telhado */}
-                      <div className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 flex items-center gap-1 whitespace-nowrap rounded-xs bg-background/90 px-1.5 py-0.5 text-[10px] font-medium shadow-md backdrop-blur-sm border border-border/80">
-                        <span className="font-semibold text-foreground">{b.shortName}</span>
-                        <span
-                          className={`text-[8px] px-1 py-0.2 rounded-xs font-mono font-bold ${style.badge}`}
-                        >
-                          {b.category}
-                        </span>
-                        {b.hasRooftop && (
-                          <span className="text-[8px] px-1 py-0.2 rounded-xs bg-red-950/80 text-red-300 font-bold border border-red-800">
-                            TELHADO
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
 
             {/* Cidades Civis */}
             {showCities &&
@@ -2578,6 +2550,106 @@ export function MapPanel() {
                 );
               })}
 
+            {/* Camada Visual de Raios / Perímetros das Zonas de PvP e Safezones */}
+            {showPvpZones &&
+              pvpZones.map((pz) => {
+                const isSelected = selectedPvpZoneId === pz.id;
+                const diameterPercent = ((pz.radius * 2) / SIZE) * 100;
+                const isPvp = pz.type === "pvp_allowed";
+
+                return (
+                  <div
+                    key={`pvp-radius-${pz.id}`}
+                    className={`pointer-events-none absolute rounded-full -translate-x-1/2 -translate-y-1/2 flex items-start justify-center transition-all ${
+                      isSelected ? "z-20 ring-2 ring-white/70" : "z-10"
+                    } ${
+                      isPvp
+                        ? "border-2 border-dashed border-red-500/80 shadow-[0_0_24px_rgba(239,68,68,0.45)]"
+                        : "border-2 border-dashed border-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                    }`}
+                    style={{
+                      left: `${(pz.x / SIZE) * 100}%`,
+                      top: `${(1 - pz.z / SIZE) * 100}%`,
+                      width: `${diameterPercent}%`,
+                      height: `${diameterPercent}%`,
+                      background: isPvp
+                        ? "radial-gradient(circle, rgba(239,68,68,0.32) 0%, rgba(220,38,38,0.14) 70%, transparent 100%)"
+                        : "radial-gradient(circle, rgba(16,185,129,0.3) 0%, rgba(5,150,105,0.12) 70%, transparent 100%)",
+                    }}
+                  >
+                    <span
+                      className={`-translate-y-1/2 whitespace-nowrap rounded-xs px-1.5 py-0.5 text-[9px] font-mono font-bold border shadow-md flex items-center gap-1 ${
+                        isPvp
+                          ? "bg-red-950/90 text-red-200 border-red-500"
+                          : "bg-emerald-950/90 text-emerald-200 border-emerald-500"
+                      }`}
+                    >
+                      {isPvp ? "⚔️ PVP LIBERADO" : "🛡️ SAFEZONE PVE"} · {pz.radius}m
+                    </span>
+                  </div>
+                );
+              })}
+
+            {/* Pinos Táticos Interativos das Zonas de PvP */}
+            {showPvpZones &&
+              pvpZones.map((pz) => {
+                const isSelected = selectedPvpZoneId === pz.id;
+                const isPvp = pz.type === "pvp_allowed";
+
+                return (
+                  <button
+                    key={`pvp-pin-${pz.id}`}
+                    title={`${pz.name}\n${isPvp ? "⚔️ Zona de PvP Liberado" : "🛡️ SafeZone PvE"}\nRaio: ${pz.radius}m\nClique para inspecionar e programar`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPvpZoneId(pz.id);
+                      setSelectedMilitaryZone(null);
+                      setSel(null);
+                      setActiveTab("pvp");
+                    }}
+                    className={`group absolute -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-125 focus:outline-none z-20 ${
+                      isSelected
+                        ? "scale-125 z-30 ring-2 ring-white ring-offset-2 ring-offset-black rounded-full"
+                        : ""
+                    }`}
+                    style={{
+                      left: `${(pz.x / SIZE) * 100}%`,
+                      top: `${(1 - pz.z / SIZE) * 100}%`,
+                    }}
+                  >
+                    <div
+                      className={`relative flex items-center justify-center size-6 rounded-full shadow-lg text-white font-bold ${
+                        isPvp
+                          ? "bg-red-600 border border-red-300 shadow-[0_0_14px_rgba(239,68,68,0.9)] animate-pulse"
+                          : "bg-emerald-600 border border-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
+                      }`}
+                    >
+                      {isPvp ? (
+                        <Crosshair className="size-3.5 text-white" />
+                      ) : (
+                        <ShieldCheck className="size-3.5 text-white" />
+                      )}
+
+                      <div className="pointer-events-none absolute left-7 top-1/2 -translate-y-1/2 flex items-center gap-1 whitespace-nowrap rounded-xs bg-background/95 px-2 py-0.5 text-[10px] font-medium shadow-lg backdrop-blur-md border border-border">
+                        <span className="font-bold text-foreground">{pz.shortName}</span>
+                        <span
+                          className={`text-[9px] px-1 py-0.2 rounded-xs font-mono font-bold ${
+                            isPvp
+                              ? "bg-red-950 text-red-300 border border-red-700"
+                              : "bg-emerald-950 text-emerald-300 border border-emerald-700"
+                          }`}
+                        >
+                          {isPvp ? "PVP" : "SAFE"}
+                        </span>
+                        <span className="text-[9px] font-mono text-muted-foreground">
+                          {pz.radius}m
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+
             {/* Marcadores Personalizados do Usuário */}
             {visibleMarkers.map((m) => {
               const isSelected = sel === m.id;
@@ -2610,6 +2682,90 @@ export function MapPanel() {
             })}
           </div>
 
+          {/* Barra Flutuante de Ajuste Rápido de Área da Zona de PvP no Mapa */}
+          {currentSelectedPvpZone && (
+            <div
+              className="absolute top-14 left-3 z-30 flex flex-wrap items-center gap-2 rounded-sm bg-card/95 px-3 py-1.5 shadow-2xl backdrop-blur-md border border-red-500/50 text-xs pointer-events-auto animate-in fade-in-50"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-1.5">
+                <Crosshair className="size-3.5 text-red-400 shrink-0" />
+                <span className="font-bold text-foreground">
+                  {currentSelectedPvpZone.shortName}
+                </span>
+                <span className="text-muted-foreground text-[10px] font-mono">
+                  X:{currentSelectedPvpZone.x} Z:{currentSelectedPvpZone.z}
+                </span>
+                <span className="font-mono font-bold text-red-400 text-xs">
+                  {currentSelectedPvpZone.radius}m
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {/* Botão Mover */}
+                <button
+                  className={`btn-ghost h-6 px-2 text-[11px] font-bold border flex items-center gap-1 ${
+                    repositioningZone?.id === currentSelectedPvpZone.id
+                      ? "bg-red-600 text-white border-red-400 animate-pulse"
+                      : "border-red-500/40 text-red-300 hover:bg-red-500/15"
+                  }`}
+                  onClick={() =>
+                    setRepositioningZone((cur) =>
+                      cur?.id === currentSelectedPvpZone.id
+                        ? null
+                        : { type: "pvp", id: currentSelectedPvpZone.id },
+                    )
+                  }
+                  title="Clique no mapa para reposicionar esta zona de PvP"
+                >
+                  <LocateFixed className="size-3" />
+                  {repositioningZone?.id === currentSelectedPvpZone.id ? "Clique..." : "Mover"}
+                </button>
+                <button
+                  className="btn-ghost size-6 p-0 text-xs font-bold"
+                  onClick={() =>
+                    handleUpdatePvpZoneRadius(
+                      currentSelectedPvpZone.id,
+                      currentSelectedPvpZone.radius - 50,
+                    )
+                  }
+                  title="Diminuir raio em 50m"
+                >
+                  −
+                </button>
+                <input
+                  type="range"
+                  min={100}
+                  max={3000}
+                  step={25}
+                  value={currentSelectedPvpZone.radius}
+                  onChange={(e) =>
+                    handleUpdatePvpZoneRadius(currentSelectedPvpZone.id, Number(e.target.value))
+                  }
+                  className="w-24 h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-red-500"
+                />
+                <button
+                  className="btn-ghost size-6 p-0 text-xs font-bold"
+                  onClick={() =>
+                    handleUpdatePvpZoneRadius(
+                      currentSelectedPvpZone.id,
+                      currentSelectedPvpZone.radius + 50,
+                    )
+                  }
+                  title="Aumentar raio em 50m"
+                >
+                  +
+                </button>
+                <button
+                  className="btn-danger size-6 p-0 text-xs ml-1"
+                  onClick={() => handleDeletePvpZone(currentSelectedPvpZone.id)}
+                  title="Remover Zona de PvP"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* HUD Flutuante Superior Esquerdo: Coordenadas em Tempo Real */}
           <div className="pointer-events-none absolute top-3 left-3 z-30 flex flex-col gap-1.5">
             <div className="flex items-center gap-2 bg-background/90 backdrop-blur-md px-2.5 py-1.5 rounded-sm border border-border/80 shadow-md">
@@ -2630,37 +2786,19 @@ export function MapPanel() {
                       .padStart(3, "0")}
                     ]
                   </span>
-                  {mapMode === "satellite" && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-xs bg-emerald-950 text-emerald-300 font-bold border border-emerald-600 flex items-center gap-1 shadow-xs">
-                      <Satellite className="size-2.5 text-emerald-400" />
-                      SATÉLITE
-                    </span>
-                  )}
-                  {mapMode === "nvg" && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-xs bg-green-950 text-green-300 font-bold border border-green-600 flex items-center gap-1 shadow-xs">
-                      🌙 NVG
-                    </span>
-                  )}
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-mono">
-                    Mova o mouse sobre Chernarus
-                  </span>
-                  {mapMode === "satellite" && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-xs bg-emerald-950 text-emerald-300 font-bold border border-emerald-600 flex items-center gap-1">
-                      <Satellite className="size-2.5 text-emerald-400" />
-                      SATÉLITE
-                    </span>
-                  )}
-                  {mapMode === "nvg" && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-xs bg-green-950 text-green-300 font-bold border border-green-600">
-                      🌙 NVG
-                    </span>
-                  )}
-                </div>
+                <span className="text-xs text-muted-foreground font-mono">
+                  Mova o mouse sobre Chernarus
+                </span>
               )}
             </div>
+            {addingPvpZone && (
+              <div className="bg-red-600 text-white px-2.5 py-1 rounded-xs text-[11px] font-bold shadow-lg flex items-center gap-1.5 animate-pulse">
+                <Crosshair className="size-3.5" />
+                Clique no mapa para posicionar a nova Zona de PvP!
+              </div>
+            )}
             {adding && (
               <div className="bg-primary text-primary-foreground px-2 py-0.5 rounded-xs text-[11px] font-semibold shadow-md flex items-center gap-1.5 animate-pulse">
                 <span className="size-1.5 rounded-full bg-white" />
@@ -2702,7 +2840,7 @@ export function MapPanel() {
             {/* Atalhos Rápidos de Zoom */}
             <div className="flex items-center gap-1 bg-background/85 backdrop-blur-md px-1.5 py-0.5 rounded-sm border border-border/70 text-[10px] shadow-sm">
               <span className="text-muted-foreground mr-0.5 font-semibold">Zoom:</span>
-              {[1, 1.5, 2.5, 4, 6].map((zVal) => (
+              {[1, 1.5, 2.5, 4, 6, 8].map((zVal) => (
                 <button
                   key={zVal}
                   onClick={() => handleZoomChange(zVal)}
@@ -2749,195 +2887,8 @@ export function MapPanel() {
 
       {/* Painel Lateral de Informações e Listagens */}
       <aside className="space-y-3">
-        {/* Card de Detalhes: Prédio Notável Selecionado */}
-        {selectedBuilding ? (
-          <div className="panel space-y-3 p-3.5 border-cyan-500/40 bg-card shadow-md">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span
-                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-xs border ${
-                      getBuildingCategoryStyle(selectedBuilding.category).badge
-                    }`}
-                  >
-                    {selectedBuilding.category}
-                  </span>
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-secondary rounded-xs border border-border text-foreground">
-                    📍 {selectedBuilding.city}
-                  </span>
-                  {selectedBuilding.hasRooftop && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-xs bg-red-950 text-red-300 font-bold border border-red-800 flex items-center gap-1">
-                      🎯 Rooftop / Sniper
-                    </span>
-                  )}
-                </div>
-                <h3 className="font-display text-base text-foreground mt-1.5 font-semibold flex items-center gap-1.5">
-                  <Building2 className="size-4 text-cyan-400 shrink-0" />
-                  {selectedBuilding.name}
-                </h3>
-              </div>
-              <button
-                className="btn-ghost size-7 p-0 text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => setSelectedBuilding(null)}
-                title="Fechar detalhes"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {selectedBuilding.description}
-            </p>
-
-            {/* Perfil de Loot */}
-            <div className="rounded-sm bg-cyan-950/20 p-2.5 border border-cyan-500/30 space-y-1.5 text-xs">
-              <span className="font-semibold text-cyan-300 flex items-center gap-1">
-                <Sparkles className="size-3.5 text-cyan-400" />
-                Loot Característico / Spawns:
-              </span>
-              <p className="text-[11px] text-foreground/90 font-medium leading-normal bg-background/60 p-2 rounded-xs border border-border/60">
-                {selectedBuilding.lootProfile}
-              </p>
-            </div>
-
-            {/* Coordenadas e Ações Rápidas */}
-            <div className="rounded-sm bg-secondary/40 p-2.5 border border-border/60 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Coordenadas de Entrada:</span>
-                <span className="font-mono font-bold text-foreground">
-                  X: {selectedBuilding.x} · Z: {selectedBuilding.z}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  className="btn-ghost text-xs py-1.5 flex items-center justify-center gap-1"
-                  onClick={() =>
-                    copyCoords(selectedBuilding.x, selectedBuilding.z, selectedBuilding.name)
-                  }
-                >
-                  <Copy className="size-3 text-cyan-400" />
-                  Copiar X 0 Z
-                </button>
-                <button
-                  className="btn-ghost text-xs py-1.5 flex items-center justify-center gap-1.5 border border-border/60 hover:bg-secondary"
-                  onClick={() => convertBuildingToMarker(selectedBuilding)}
-                >
-                  <Plus className="size-3.5 text-cyan-400" />
-                  Criar Marcador
-                </button>
-              </div>
-
-              <button
-                className="btn-primary w-full text-xs py-1.5 flex items-center justify-center gap-1.5 shadow-xs"
-                onClick={() => focusOnLocation(selectedBuilding.x, selectedBuilding.z, 3.5)}
-              >
-                <LocateFixed className="size-3.5" />
-                Focar Prédio no Mapa
-              </button>
-            </div>
-          </div>
-        ) : selectedRoad ? (
-          /* Card de Detalhes: Estrada / Via Selecionada */
-          <div className="panel space-y-3 p-3.5 border-orange-500/40 bg-card shadow-md">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="px-2 py-0.5 text-[11px] font-semibold rounded-xs border border-orange-600 bg-orange-950/80 text-orange-300">
-                    {selectedRoad.type}
-                  </span>
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-secondary rounded-xs border border-border text-foreground">
-                    Pavimento: {selectedRoad.surface}
-                  </span>
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-xs font-bold border ${
-                      selectedRoad.dangerLevel.includes("Alto")
-                        ? "bg-red-950 text-red-300 border-red-800"
-                        : "bg-amber-950 text-amber-300 border-amber-800"
-                    }`}
-                  >
-                    Perigo: {selectedRoad.dangerLevel}
-                  </span>
-                </div>
-                <h3 className="font-display text-base text-foreground mt-1.5 font-semibold flex items-center gap-1.5">
-                  <Route className="size-4 text-orange-400 shrink-0" />
-                  {selectedRoad.name}
-                </h3>
-              </div>
-              <button
-                className="btn-ghost size-7 p-0 text-muted-foreground hover:text-foreground text-xs"
-                onClick={() => setSelectedRoad(null)}
-                title="Fechar detalhes"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {selectedRoad.description}
-            </p>
-
-            {/* Cidades e Destinos Conectados */}
-            <div className="rounded-sm bg-orange-950/20 p-2.5 border border-orange-500/30 space-y-1.5 text-xs">
-              <span className="font-semibold text-orange-300 flex items-center gap-1">
-                <Compass className="size-3.5 text-orange-400" />
-                Cidades e Destinos Conectados:
-              </span>
-              <p className="text-[11px] text-foreground font-medium leading-normal bg-background/60 p-2 rounded-xs border border-border/60">
-                {selectedRoad.destinations}
-              </p>
-            </div>
-
-            {/* Pontos da Rota e Ações Rápidas */}
-            <div className="rounded-sm bg-secondary/40 p-2.5 border border-border/60 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Início da Rota:</span>
-                <span className="font-mono font-bold text-foreground">
-                  X: {selectedRoad.points[0][0]} · Z: {selectedRoad.points[0][1]}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Pontos de Traçado no Mapa:</span>
-                <span className="font-mono text-muted-foreground">
-                  {selectedRoad.points.length} marcos mapeados
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  className="btn-ghost text-xs py-1.5 flex items-center justify-center gap-1"
-                  onClick={() =>
-                    copyCoords(
-                      selectedRoad.points[0][0],
-                      selectedRoad.points[0][1],
-                      selectedRoad.name,
-                    )
-                  }
-                >
-                  <Copy className="size-3 text-orange-400" />
-                  Copiar Início
-                </button>
-                <button
-                  className="btn-ghost text-xs py-1.5 flex items-center justify-center gap-1.5 border border-border/60 hover:bg-secondary"
-                  onClick={() => convertRoadToMarker(selectedRoad)}
-                >
-                  <Plus className="size-3.5 text-orange-400" />
-                  Criar Marcador
-                </button>
-              </div>
-
-              <button
-                className="btn-primary w-full text-xs py-1.5 flex items-center justify-center gap-1.5 shadow-xs"
-                onClick={() =>
-                  focusOnLocation(selectedRoad.points[0][0], selectedRoad.points[0][1], 2.5)
-                }
-              >
-                <LocateFixed className="size-3.5" />
-                Focar Início da Estrada
-              </button>
-            </div>
-          </div>
-        ) : currentSelectedZone ? (
+        {/* Card de Detalhes: Zona Militar Selecionada */}
+        {currentSelectedZone ? (
           <div className="panel space-y-3 p-3.5 border-amber-500/40 bg-card shadow-md">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -3316,12 +3267,17 @@ export function MapPanel() {
                           className="rounded-xs bg-background/70 p-2 border border-border/50 text-xs space-y-1.5 shadow-2xs"
                         >
                           <div className="flex items-center justify-between gap-1">
-                            <span
-                              className="font-semibold text-foreground truncate max-w-[170px]"
-                              title={item.name}
-                            >
-                              {item.name}
-                            </span>
+                            <div className="flex flex-col min-w-0 max-w-[170px]">
+                              <span
+                                className="font-semibold text-foreground truncate"
+                                title={item.name}
+                              >
+                                {getItemLabel(item.name)}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-mono truncate">
+                                {item.name}
+                              </span>
+                            </div>
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={`text-[9px] px-1.5 py-0.2 rounded-xs font-mono font-bold border ${badge.badge}`}
@@ -3472,18 +3428,122 @@ export function MapPanel() {
               </div>
             </div>
 
-            {/* Coordenadas, Raio e Ações Rápidas de Exportação de Zona para Servidor */}
-            <div className="rounded-sm bg-secondary/40 p-2.5 border border-border/60 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Centro & Raio:</span>
-                <span className="font-mono font-bold text-foreground">
-                  X: {currentSelectedZone.x} · Z: {currentSelectedZone.z} (r=
-                  {currentSelectedZone.radius}m)
-                </span>
+            {/* Painel de Coordenadas e Posição da Zona Militar */}
+            <div className="rounded-sm bg-secondary/40 p-3 border border-border/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                  <MapPin className="size-4 text-primary" />
+                  <span>Posição da Zona (Coordenadas X / Z)</span>
+                </div>
+                {(() => {
+                  const defaultZ = MILITARY_ZONES.find((d) => d.id === currentSelectedZone.id);
+                  const isMoved =
+                    defaultZ &&
+                    (defaultZ.x !== currentSelectedZone.x || defaultZ.z !== currentSelectedZone.z);
+                  if (!isMoved) return null;
+                  return (
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                      Posição Alterada
+                    </span>
+                  );
+                })()}
               </div>
 
-              {/* Botões de Cópia XML DayZ */}
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] text-muted-foreground font-mono block mb-1">
+                    Coordenada X (0 - 15360):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={SIZE}
+                    step={50}
+                    value={currentSelectedZone.x}
+                    onChange={(e) =>
+                      handleUpdateMilitaryZoneCoords(
+                        currentSelectedZone.id,
+                        Number(e.target.value),
+                        currentSelectedZone.z,
+                      )
+                    }
+                    className="field w-full font-mono text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground font-mono block mb-1">
+                    Coordenada Z (0 - 15360):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={SIZE}
+                    step={50}
+                    value={currentSelectedZone.z}
+                    onChange={(e) =>
+                      handleUpdateMilitaryZoneCoords(
+                        currentSelectedZone.id,
+                        currentSelectedZone.x,
+                        Number(e.target.value),
+                      )
+                    }
+                    className="field w-full font-mono text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <button
+                  className={`btn text-xs py-1.5 px-3 flex items-center justify-center gap-1.5 flex-1 font-bold ${
+                    repositioningZone?.id === currentSelectedZone.id
+                      ? "bg-primary text-primary-foreground animate-pulse"
+                      : "btn-primary"
+                  }`}
+                  onClick={() =>
+                    setRepositioningZone((cur) =>
+                      cur?.id === currentSelectedZone.id
+                        ? null
+                        : { type: "military", id: currentSelectedZone.id },
+                    )
+                  }
+                  title="Ativar modo de clique no mapa para mover"
+                >
+                  <LocateFixed className="size-3.5" />
+                  {repositioningZone?.id === currentSelectedZone.id
+                    ? "Clique no Mapa..."
+                    : "Mover no Mapa (Clique)"}
+                </button>
+
+                {(() => {
+                  const defaultZ = MILITARY_ZONES.find((d) => d.id === currentSelectedZone.id);
+                  const isMoved =
+                    defaultZ &&
+                    (defaultZ.x !== currentSelectedZone.x || defaultZ.z !== currentSelectedZone.z);
+                  if (!isMoved) return null;
+                  return (
+                    <button
+                      className="btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1 border border-border/60 hover:text-foreground text-muted-foreground"
+                      onClick={() => handleResetMilitaryZoneCoords(currentSelectedZone.id)}
+                      title={`Restaurar coordenadas originais: X:${defaultZ.x} Z:${defaultZ.z}`}
+                    >
+                      <RotateCcw className="size-3" />
+                      Restaurar Posição
+                    </button>
+                  );
+                })()}
+
+                <button
+                  className="btn-danger text-xs py-1.5 px-2.5 flex items-center gap-1"
+                  onClick={() => handleDeleteMilitaryZone(currentSelectedZone.id)}
+                  title="Remover ou ocultar esta zona militar do mapa"
+                >
+                  <Trash2 className="size-3" />
+                  Tirar Zona
+                </button>
+              </div>
+
+              {/* Botões de Cópia XML DayZ e Focar */}
+              <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-border/40">
                 <button
                   className="btn-ghost text-xs py-1.5 flex items-center justify-center gap-1 hover:text-primary"
                   onClick={() => copyZoneEventXml(currentSelectedZone)}
@@ -3540,6 +3600,223 @@ export function MapPanel() {
                 <LocateFixed className="size-3.5" />
                 Focar Zona no Mapa
               </button>
+            </div>
+          </div>
+        ) : currentSelectedPvpZone ? (
+          /* Card de Detalhes: Zona de PvP Selecionada */
+          <div className="panel space-y-3 p-3.5 border-red-500/50 bg-card shadow-md animate-in fade-in-50">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`px-2 py-0.5 text-[11px] font-bold rounded-xs border ${
+                      currentSelectedPvpZone.type === "pvp_allowed"
+                        ? "bg-red-950 text-red-300 border-red-700"
+                        : "bg-emerald-950 text-emerald-300 border-emerald-700"
+                    }`}
+                  >
+                    {currentSelectedPvpZone.type === "pvp_allowed"
+                      ? "⚔️ PVP LIBERADO"
+                      : "🛡️ SAFEZONE PVE"}
+                  </span>
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    Raio: {currentSelectedPvpZone.radius}m
+                  </span>
+                </div>
+                <h3 className="font-display text-base text-foreground mt-1 font-semibold flex items-center gap-1.5">
+                  <Crosshair className="size-4 text-red-400 shrink-0" />
+                  {currentSelectedPvpZone.name}
+                </h3>
+              </div>
+              <button
+                className="btn-ghost size-7 p-0 text-muted-foreground hover:text-foreground text-xs"
+                onClick={() => setSelectedPvpZoneId(null)}
+                title="Fechar inspeção"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Edição de Nome e Tipo */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-muted-foreground font-semibold block mb-0.5">
+                  Nome da Zona:
+                </label>
+                <input
+                  type="text"
+                  value={currentSelectedPvpZone.name}
+                  onChange={(e) =>
+                    handleUpdatePvpZoneField(currentSelectedPvpZone.id, { name: e.target.value })
+                  }
+                  className="field w-full text-xs font-medium"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground font-semibold block mb-0.5">
+                  Tipo de Zona:
+                </label>
+                <select
+                  value={currentSelectedPvpZone.type}
+                  onChange={(e) =>
+                    handleUpdatePvpZoneField(currentSelectedPvpZone.id, {
+                      type: e.target.value as any,
+                    })
+                  }
+                  className="field w-full text-xs font-medium"
+                >
+                  <option value="pvp_allowed">⚔️ PvP Liberado</option>
+                  <option value="safezone">🛡️ Safezone PvE Protegida</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Mudança de Posição / Coordenadas X e Z */}
+            <div className="rounded-sm bg-secondary/40 p-2.5 border border-border/60 space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                <span className="flex items-center gap-1">
+                  <MapPin className="size-3.5 text-red-400" />
+                  Posição da Zona (X / Z):
+                </span>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  X: {currentSelectedPvpZone.x} · Z: {currentSelectedPvpZone.z}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground font-mono block">
+                    X (0 - 15360):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={SIZE}
+                    step={50}
+                    value={currentSelectedPvpZone.x}
+                    onChange={(e) =>
+                      handleUpdatePvpZoneCoords(
+                        currentSelectedPvpZone.id,
+                        Number(e.target.value),
+                        currentSelectedPvpZone.z,
+                      )
+                    }
+                    className="field w-full font-mono text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground font-mono block">
+                    Z (0 - 15360):
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={SIZE}
+                    step={50}
+                    value={currentSelectedPvpZone.z}
+                    onChange={(e) =>
+                      handleUpdatePvpZoneCoords(
+                        currentSelectedPvpZone.id,
+                        currentSelectedPvpZone.x,
+                        Number(e.target.value),
+                      )
+                    }
+                    className="field w-full font-mono text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  className={`btn text-xs py-1.5 px-3 flex-1 flex items-center justify-center gap-1.5 font-bold ${
+                    repositioningZone?.id === currentSelectedPvpZone.id
+                      ? "bg-red-600 text-white animate-pulse"
+                      : "btn-primary"
+                  }`}
+                  onClick={() =>
+                    setRepositioningZone((cur) =>
+                      cur?.id === currentSelectedPvpZone.id
+                        ? null
+                        : { type: "pvp", id: currentSelectedPvpZone.id },
+                    )
+                  }
+                >
+                  <LocateFixed className="size-3.5" />
+                  {repositioningZone?.id === currentSelectedPvpZone.id
+                    ? "Clique no Mapa..."
+                    : "Mover no Mapa (Clique)"}
+                </button>
+                <button
+                  className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 border border-border/60 hover:text-foreground text-muted-foreground"
+                  onClick={() => focusOnLocation(currentSelectedPvpZone.x, currentSelectedPvpZone.z, 2.5)}
+                  title="Focar no mapa"
+                >
+                  <LocateFixed className="size-3.5 text-primary" />
+                  Focar
+                </button>
+                <button
+                  className="btn-danger text-xs py-1.5 px-3 flex items-center gap-1"
+                  onClick={() => handleDeletePvpZone(currentSelectedPvpZone.id)}
+                  title="Excluir esta Zona de PvP"
+                >
+                  <Trash2 className="size-3.5" />
+                  Excluir
+                </button>
+              </div>
+            </div>
+
+            {/* Controle de Raio */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Raio de Cobertura:</span>
+                <span className="font-mono font-bold text-red-400">
+                  {currentSelectedPvpZone.radius} metros
+                </span>
+              </div>
+              <input
+                type="range"
+                min={100}
+                max={3000}
+                step={25}
+                value={currentSelectedPvpZone.radius}
+                onChange={(e) =>
+                  handleUpdatePvpZoneRadius(currentSelectedPvpZone.id, Number(e.target.value))
+                }
+                className="h-2 w-full cursor-pointer accent-red-500 bg-secondary rounded-lg"
+              />
+            </div>
+
+            {/* Notificações de Entrada / Saída */}
+            <div className="space-y-1.5 text-xs">
+              <div>
+                <label className="text-[10px] text-muted-foreground font-semibold block mb-0.5">
+                  Mensagem ao Entrar:
+                </label>
+                <input
+                  type="text"
+                  value={currentSelectedPvpZone.enterNotification}
+                  onChange={(e) =>
+                    handleUpdatePvpZoneField(currentSelectedPvpZone.id, {
+                      enterNotification: e.target.value,
+                    })
+                  }
+                  className="field w-full text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground font-semibold block mb-0.5">
+                  Mensagem ao Sair:
+                </label>
+                <input
+                  type="text"
+                  value={currentSelectedPvpZone.exitNotification}
+                  onChange={(e) =>
+                    handleUpdatePvpZoneField(currentSelectedPvpZone.id, {
+                      exitNotification: e.target.value,
+                    })
+                  }
+                  className="field w-full text-xs"
+                />
+              </div>
             </div>
           </div>
         ) : cur ? (
@@ -3644,49 +3921,38 @@ export function MapPanel() {
 
         {/* Painel de Navegação: Zonas Militares do Mapa vs Meus Marcadores */}
         <div className="panel space-y-3 p-3">
-          <div className="grid grid-cols-2 gap-1 rounded-sm bg-secondary/50 p-1 border border-border/60">
+          <div className="flex rounded-sm bg-secondary/50 p-1 border border-border/60 gap-1">
             <button
-              className={`py-1 px-1.5 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
+              className={`flex-1 py-1 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
                 activeTab === "military"
                   ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               }`}
               onClick={() => setActiveTab("military")}
             >
-              <ShieldAlert className="size-3" />
-              <span>Zonas ({visibleMilitaryZones.length})</span>
+              <ShieldAlert className="size-3.5" />
+              <span>Militares ({visibleMilitaryZones.length})</span>
             </button>
             <button
-              className={`py-1 px-1.5 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
-                activeTab === "buildings"
-                  ? "bg-cyan-600 text-white shadow-xs"
+              className={`flex-1 py-1 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
+                activeTab === "pvp"
+                  ? "bg-red-600 text-white shadow-xs font-bold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              onClick={() => setActiveTab("buildings")}
+              onClick={() => setActiveTab("pvp")}
             >
-              <Building2 className="size-3 text-cyan-400" />
-              <span>Prédios ({visibleBuildings.length})</span>
+              <Swords className="size-3.5 text-red-300" />
+              <span>Zonas PvP ({pvpZones.length})</span>
             </button>
             <button
-              className={`py-1 px-1.5 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
-                activeTab === "roads"
-                  ? "bg-orange-600 text-white shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => setActiveTab("roads")}
-            >
-              <Route className="size-3 text-orange-400" />
-              <span>Estradas ({visibleRoads.length})</span>
-            </button>
-            <button
-              className={`py-1 px-1.5 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
+              className={`flex-1 py-1 text-xs font-semibold rounded-xs transition-colors flex items-center justify-center gap-1 ${
                 activeTab === "custom"
                   ? "bg-primary text-primary-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
               }`}
               onClick={() => setActiveTab("custom")}
             >
-              <MapPin className="size-3" />
+              <MapPin className="size-3.5" />
               <span>Marcadores ({markers.length})</span>
             </button>
           </div>
@@ -3698,12 +3964,10 @@ export function MapPanel() {
               className="field w-full pl-8 text-xs"
               placeholder={
                 activeTab === "military"
-                  ? "Buscar zona militar, loot (M4A1, Gás, Bunkers)..."
-                  : activeTab === "buildings"
-                    ? "Buscar hospital, polícia, bombeiros, castelo, cidade..."
-                    : activeTab === "roads"
-                      ? "Buscar por rodovia, ferrovia, conexão..."
-                      : "Buscar por nome, clã ou notas..."
+                  ? "Buscar zona, cidade, estrutura ou loot (M4A1, Bunkers, Gás)..."
+                  : activeTab === "pvp"
+                    ? "Buscar zonas de PvP por nome ou coordenadas..."
+                    : "Buscar por nome, clã ou notas..."
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -3720,7 +3984,71 @@ export function MapPanel() {
 
           {/* Conteúdo da Tab: Zonas Militares */}
           {activeTab === "military" ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
+              {/* Botões de Ações de Zonas Militares: Nova Zona e Restaurar */}
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    className={`py-1.5 px-2.5 rounded-sm text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs ${
+                      addingMilitaryZone
+                        ? "bg-amber-600 text-white ring-2 ring-amber-400 animate-pulse"
+                        : "bg-primary text-primary-foreground hover:bg-primary/90"
+                    }`}
+                    onClick={() => {
+                      setAddingMilitaryZone((a) => !a);
+                      setAddingPvpZone(false);
+                    }}
+                    title="Criar nova zona militar clicando no mapa de Chernarus"
+                  >
+                    <Plus className="size-3.5" />
+                    {addingMilitaryZone ? "Clique no Mapa..." : "+ Nova Zona (Clique)"}
+                  </button>
+                  <button
+                    className="btn-ghost py-1.5 px-2 text-xs font-semibold border border-border/70 hover:bg-secondary flex items-center justify-center gap-1"
+                    onClick={() => {
+                      setNewZoneForm({
+                        name: "Nova Zona Militar",
+                        shortName: "Nova Base",
+                        x: 7500,
+                        z: 7500,
+                        radius: 500,
+                        tier: "Tier 3",
+                        zoneType: "Complexo Militar Principal",
+                        pvpType: "pvp_allowed",
+                        description:
+                          "Zona militar customizada com spawns de armas e itens de alto nível.",
+                      });
+                      setShowAddZoneModal("military");
+                    }}
+                    title="Digitar coordenadas X e Z exatas para criar zona militar"
+                  >
+                    <MapPin className="size-3 text-primary" />
+                    + Manual (X, Z)
+                  </button>
+                </div>
+
+                {/* Botão de Restaurar Zonas Originais se houver modificações */}
+                {(() => {
+                  const isModified =
+                    militaryZones.length !== MILITARY_ZONES.length ||
+                    militaryZones.some((z) => {
+                      const orig = MILITARY_ZONES.find((o) => o.id === z.id);
+                      return !orig || orig.x !== z.x || orig.z !== z.z || orig.radius !== z.radius;
+                    });
+                  if (!isModified) return null;
+                  return (
+                    <button
+                      className="btn-ghost w-full py-1 px-2.5 text-[11px] font-medium border border-border/60 hover:text-foreground text-muted-foreground flex items-center justify-center gap-1.5"
+                      onClick={handleResetAllMilitaryZones}
+                      title="Restaurar todas as 25 zonas militares oficiais do DayZ"
+                    >
+                      <RotateCcw className="size-3" />
+                      Restaurar Padrão Oficial (25 Zonas)
+                    </button>
+                  );
+                })()}
+              </div>
+
               {/* Banner / Botão de Ação Rápida para Configurar Chance de Drop */}
               <div className="p-2 rounded-sm bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-between gap-2 shadow-2xs">
                 <div className="flex items-center gap-1.5 text-xs">
@@ -3808,9 +4136,20 @@ export function MapPanel() {
                           <span className="text-muted-foreground/80 font-mono">
                             X {z.x} · Z {z.z}
                           </span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <span
-                              className="text-[10px] px-2 py-0.5 rounded-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1 hover:bg-emerald-500/25 transition-colors cursor-pointer"
+                              className="text-[10px] px-1.5 py-0.5 rounded-xs bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRepositioningZone({ type: "military", id: z.id });
+                              }}
+                              title="Reposicionar esta zona no mapa"
+                            >
+                              <LocateFixed className="size-2.5 text-amber-400" />
+                              Mover
+                            </span>
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1 hover:bg-emerald-500/25 transition-colors cursor-pointer"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedMilitaryZone(z);
@@ -3820,9 +4159,18 @@ export function MapPanel() {
                               title="Abrir painel para alterar a % de chance de drop desta zona"
                             >
                               <Percent className="size-2.5 text-emerald-400" />
-                              Mudar Drop
+                              Drop
                             </span>
-                            <span className="text-primary group-hover:underline">Detalhes →</span>
+                            <span
+                              className="text-[10px] px-1 py-0.5 rounded-xs text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMilitaryZone(z.id);
+                              }}
+                              title="Tirar/Excluir zona militar"
+                            >
+                              <Trash2 className="size-3" />
+                            </span>
                           </div>
                         </div>
                       </button>
@@ -3831,151 +4179,322 @@ export function MapPanel() {
                 })}
               </ul>
             </div>
-          ) : activeTab === "buildings" ? (
-            /* Conteúdo da Tab: Prédios e Estruturas Notáveis */
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
-                <span>Clique para ver loot e focar no mapa:</span>
-                <span className="font-mono text-cyan-400 font-bold">
-                  {visibleBuildings.length} prédios
-                </span>
+          ) : activeTab === "pvp" ? (
+            /* Conteúdo da Tab: Zonas de PvP & Safezones Programáveis */
+            <div className="space-y-3">
+              {/* Card Mestre: Modo PvP Restrito por Zonas (Fora da Zona: Sem dano em jogador) */}
+              <div
+                className={`p-3 rounded-sm border transition-all ${
+                  pvpRestrictedMode
+                    ? "bg-emerald-950/20 border-emerald-500/50 shadow-sm"
+                    : "bg-secondary/40 border-border"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {pvpRestrictedMode ? (
+                      <ShieldCheck className="size-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <Swords className="size-4 text-muted-foreground shrink-0" />
+                    )}
+                    <div>
+                      <span className="font-bold text-xs text-foreground block">
+                        Modo PvP Restrito por Zonas
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {pvpRestrictedMode
+                          ? "🟢 ATIVADO: Fora das zonas marcadas, tiro em jogador é BLOQUEADO!"
+                          : "⚪ DESATIVADO: Tiro em jogadores liberado em todo o mapa (Vanilla)."}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    className={`btn text-[11px] py-1 px-2.5 font-bold transition-all shrink-0 ${
+                      pvpRestrictedMode
+                        ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                        : "btn-ghost border border-border"
+                    }`}
+                    onClick={() => handleToggleRestrictedPvp(!pvpRestrictedMode)}
+                  >
+                    {pvpRestrictedMode ? "Ativado" : "Desativado"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed border-t border-border/40 pt-1.5">
+                  Quando ativado, os jogadores só conseguem causar dano e atirar em outros jogadores
+                  se ambos estiverem DENTRO dos círculos de PvP programados abaixo.
+                </p>
               </div>
 
-              {visibleBuildings.length === 0 ? (
-                <div className="rounded-sm border border-dashed border-border/80 p-4 text-center text-xs text-muted-foreground">
-                  Nenhum prédio encontrado com esse filtro ou busca.
+              {/* Card Rápido: Controle de Raid de Bases */}
+              <div
+                className={`p-3 rounded-sm border transition-all ${
+                  raidConfig.raidEnabled
+                    ? "bg-amber-950/20 border-amber-500/50 shadow-sm"
+                    : "bg-emerald-950/20 border-emerald-500/50"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {raidConfig.raidEnabled ? (
+                      <Bomb className="size-4 text-amber-400 shrink-0" />
+                    ) : (
+                      <Shield className="size-4 text-emerald-400 shrink-0" />
+                    )}
+                    <div>
+                      <span className="font-bold text-xs text-foreground block">
+                        Raid de Bases (Danos em Construções)
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {raidConfig.raidEnabled
+                          ? "💥 RAID ATIVADO: Paredes e portões podem ser invadidos e destruídos."
+                          : "🛡️ BASES PROTEGIDAS: Construções 100% invulneráveis a tiros e explosivos."}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    className={`btn text-[11px] py-1 px-2.5 font-bold transition-all shrink-0 ${
+                      raidConfig.raidEnabled
+                        ? "bg-amber-600 hover:bg-amber-500 text-white animate-pulse"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    }`}
+                    onClick={() => handleToggleRaidQuick(!raidConfig.raidEnabled)}
+                  >
+                    {raidConfig.raidEnabled ? "Raid Ativo" : "Bases Salvas"}
+                  </button>
                 </div>
-              ) : (
-                <ul className="max-h-[380px] space-y-1.5 overflow-auto pr-1">
-                  {visibleBuildings.map((b) => {
-                    const isSelected = selectedBuilding?.id === b.id;
-                    const style = getBuildingCategoryStyle(b.category);
-                    const CategoryIcon = style.Icon;
+              </div>
 
-                    return (
-                      <li key={b.id}>
+              {/* Ações de Adicionar Nova Zona de PvP */}
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    className={`py-1.5 px-2.5 rounded-sm text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs ${
+                      addingPvpZone
+                        ? "bg-red-600 text-white ring-2 ring-red-400 animate-pulse"
+                        : "bg-red-600 text-white hover:bg-red-500"
+                    }`}
+                    onClick={() => {
+                      setAddingPvpZone((a) => !a);
+                      setAddingMilitaryZone(false);
+                    }}
+                    title="Criar nova zona de PvP clicando no mapa"
+                  >
+                    <Plus className="size-3.5" />
+                    {addingPvpZone ? "Clique no Mapa..." : "+ Zona PvP (Clique)"}
+                  </button>
+                  <button
+                    className="btn-ghost py-1.5 px-2 text-xs font-semibold border border-border/70 hover:bg-secondary flex items-center justify-center gap-1"
+                    onClick={() => {
+                      setNewZoneForm({
+                        name: `Zona de PvP ${pvpZones.length + 1}`,
+                        shortName: `PVP ${pvpZones.length + 1}`,
+                        x: 7500,
+                        z: 7500,
+                        radius: 750,
+                        tier: "Tier 3",
+                        zoneType: "Complexo Militar Principal",
+                        pvpType: "pvp_allowed",
+                        description: "Área designada para combate livre entre sobreviventes.",
+                      });
+                      setShowAddZoneModal("pvp");
+                    }}
+                    title="Digitar coordenadas X e Z exatas para criar zona de PvP ou Safezone"
+                  >
+                    <MapPin className="size-3 text-red-400" />
+                    + Manual (X, Z)
+                  </button>
+                </div>
+
+                {/* Predefinições Rápidas de Zonas de Chernarus com 1 Clique */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-semibold text-muted-foreground block">
+                    Adicionar Zonas Táticas Famosas (1 Clique):
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {DEFAULT_PVP_ZONES.map((preset) => {
+                      const isAdded = pvpZones.some((z) => z.shortName === preset.shortName);
+                      return (
                         <button
-                          className={`group w-full rounded-sm p-2 text-left text-xs transition-all border ${
-                            isSelected
-                              ? "bg-cyan-500/15 border-cyan-500/60 shadow-xs"
-                              : "bg-secondary/40 hover:bg-secondary border-border/40"
+                          key={preset.id}
+                          className={`px-2 py-0.5 rounded-xs text-[11px] border transition-all ${
+                            isAdded
+                              ? "bg-red-500/15 border-red-500/40 text-red-300 font-semibold"
+                              : "btn-ghost border-border hover:bg-secondary text-muted-foreground"
                           }`}
-                          onClick={() => {
-                            setSelectedBuilding(b);
-                            setSelectedMilitaryZone(null);
-                            setSelectedRoad(null);
-                            setSel(null);
-                            focusOnLocation(b.x, b.z, 3.5);
-                          }}
+                          onClick={() => handleAddPresetPvpZone(preset)}
+                          title={`${preset.name} · Raio: ${preset.radius}m`}
                         >
-                          <div className="flex items-center justify-between gap-1.5 mb-1">
-                            <span className="font-semibold text-foreground group-hover:text-cyan-400 transition-colors flex items-center gap-1.5 truncate">
-                              <CategoryIcon className={`size-3.5 shrink-0 ${style.text}`} />
-                              <span className="truncate">{b.name}</span>
-                            </span>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded-xs font-mono font-bold ${style.badge}`}
-                              >
-                                {b.category}
-                              </span>
-                              {b.hasRooftop && (
-                                <span className="text-[9px] px-1 py-0.2 rounded-xs bg-red-950 text-red-300 font-bold border border-red-800">
-                                  🎯
+                          {isAdded ? "✓ " : "+ "}
+                          {preset.shortName} ({preset.radius}m)
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista das Zonas de PvP Programadas */}
+              <div className="space-y-2 pt-1 border-t border-border/40">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    Zonas Programadas ({pvpZones.length}):
+                  </span>
+                  <button
+                    className="text-[11px] text-primary hover:underline flex items-center gap-1 font-semibold"
+                    onClick={() => setShowInitScriptModal(true)}
+                  >
+                    <FileCode className="size-3" />
+                    Gerar Script init.c
+                  </button>
+                </div>
+
+                {pvpZones.length === 0 ? (
+                  <div className="rounded-sm border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                    Nenhuma zona de PvP cadastrada. Use o botão acima ou as predefinições para
+                    programar suas áreas de combate!
+                  </div>
+                ) : (
+                  <div className="max-h-[380px] space-y-2 overflow-y-auto pr-1">
+                    {pvpZones
+                      .filter((z) =>
+                        (z.name + z.shortName + z.description)
+                          .toLowerCase()
+                          .includes(search.toLowerCase()),
+                      )
+                      .map((zone) => {
+                        const isSelected = selectedPvpZoneId === zone.id;
+                        return (
+                          <div
+                            key={zone.id}
+                            className={`p-2.5 rounded-sm border text-xs space-y-2 transition-all ${
+                              isSelected
+                                ? "bg-card border-red-500 shadow-md ring-1 ring-red-500/50"
+                                : "bg-card/70 border-border/60 hover:border-border"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className={`size-2.5 rounded-full shrink-0 ${
+                                    zone.enabled
+                                      ? "bg-red-500 animate-pulse"
+                                      : "bg-muted-foreground"
+                                  }`}
+                                />
+                                <span
+                                  className="font-bold text-foreground truncate cursor-pointer hover:text-primary"
+                                  onClick={() => {
+                                    setSelectedPvpZoneId(zone.id);
+                                    focusOnLocation(zone.x, zone.z, 2.5);
+                                  }}
+                                  title="Clique para focar no mapa"
+                                >
+                                  {zone.name}
                                 </span>
-                              )}
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  className={`px-1.5 py-0.5 rounded-xs text-[10px] font-bold border ${
+                                    zone.enabled
+                                      ? "bg-red-500/20 text-red-300 border-red-500/60"
+                                      : "bg-muted text-muted-foreground border-border"
+                                  }`}
+                                  onClick={() => handleTogglePvpZone(zone.id)}
+                                  title="Ativar ou desativar esta zona"
+                                >
+                                  {zone.enabled ? "Ativa" : "Pausada"}
+                                </button>
+                                <button
+                                  className={`btn-ghost size-6 p-0 ${
+                                    repositioningZone?.id === zone.id
+                                      ? "text-red-400 animate-pulse bg-red-500/20"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                  onClick={() =>
+                                    setRepositioningZone((cur) =>
+                                      cur?.id === zone.id ? null : { type: "pvp", id: zone.id },
+                                    )
+                                  }
+                                  title="Mover esta zona no mapa"
+                                >
+                                  <Move className="size-3.5 text-primary" />
+                                </button>
+                                <button
+                                  className="btn-ghost size-6 p-0 text-muted-foreground hover:text-foreground"
+                                  onClick={() => focusOnLocation(zone.x, zone.z, 2.5)}
+                                  title="Centralizar no mapa"
+                                >
+                                  <LocateFixed className="size-3.5 text-primary" />
+                                </button>
+                                <button
+                                  className="btn-ghost size-6 p-0 text-muted-foreground hover:text-destructive"
+                                  onClick={() => handleDeletePvpZone(zone.id)}
+                                  title="Excluir Zona"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span className="font-mono">
+                                Coords: X: {zone.x} · Z: {zone.z}
+                              </span>
+                              <span className="font-mono font-bold text-red-400">
+                                Raio: {zone.radius} metros
+                              </span>
+                            </div>
+
+                            {/* Slider de Raio em Metros */}
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                <span>Ajustar Raio de PvP:</span>
+                                <span>{zone.radius}m</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="100"
+                                max="3000"
+                                step="25"
+                                value={zone.radius}
+                                onChange={(e) =>
+                                  handleUpdatePvpZoneRadius(zone.id, Number(e.target.value))
+                                }
+                                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-secondary accent-red-500"
+                              />
+                            </div>
+
+                            {/* Notificação ao entrar */}
+                            <div className="text-[10px] text-muted-foreground bg-secondary/30 p-1.5 rounded-xs">
+                              <span className="font-semibold text-foreground block">
+                                Mensagem de Entrada:
+                              </span>
+                              <span className="italic">{zone.enterNotification}</span>
                             </div>
                           </div>
-                          <p className="text-[11px] text-muted-foreground line-clamp-1 mb-1">
-                            📍 {b.city} · {b.description}
-                          </p>
-                          <div className="flex items-center justify-between text-[10px] pt-1 mt-1 border-t border-border/30">
-                            <span className="text-muted-foreground/80 font-mono">
-                              X {b.x} · Z {b.z}
-                            </span>
-                            <span className="text-cyan-400 group-hover:underline">
-                              Loot & Detalhes →
-                            </span>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          ) : activeTab === "roads" ? (
-            /* Conteúdo da Tab: Estradas e Linhas Férreas */
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
-                <span>Clique para inspecionar rota e conexões:</span>
-                <span className="font-mono text-orange-400 font-bold">
-                  {visibleRoads.length} rotas
-                </span>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
 
-              {visibleRoads.length === 0 ? (
-                <div className="rounded-sm border border-dashed border-border/80 p-4 text-center text-xs text-muted-foreground">
-                  Nenhuma rota encontrada com esse filtro ou busca.
+              {/* Botão para Abrir o Código do Servidor */}
+              <div className="p-2.5 rounded-sm bg-primary/10 border border-primary/30 flex items-center justify-between gap-2">
+                <div className="text-xs">
+                  <span className="font-bold text-primary block">Aplicar no Servidor DayZ</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    Gere o script pronto para colar em init.c
+                  </span>
                 </div>
-              ) : (
-                <ul className="max-h-[380px] space-y-1.5 overflow-auto pr-1">
-                  {visibleRoads.map((r) => {
-                    const isSelected = selectedRoad?.id === r.id;
-                    const isRailway = r.type === "Linha Férrea (Trem)";
-
-                    return (
-                      <li key={r.id}>
-                        <button
-                          className={`group w-full rounded-sm p-2 text-left text-xs transition-all border ${
-                            isSelected
-                              ? "bg-orange-500/15 border-orange-500/60 shadow-xs"
-                              : "bg-secondary/40 hover:bg-secondary border-border/40"
-                          }`}
-                          onClick={() => {
-                            setSelectedRoad(r);
-                            setSelectedBuilding(null);
-                            setSelectedMilitaryZone(null);
-                            setSel(null);
-                            focusOnLocation(r.points[0][0], r.points[0][1], 2.5);
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-1.5 mb-1">
-                            <span className="font-semibold text-foreground group-hover:text-orange-400 transition-colors flex items-center gap-1.5 truncate">
-                              {isRailway ? (
-                                <Train className="size-3.5 text-red-400 shrink-0" />
-                              ) : (
-                                <Route className="size-3.5 text-orange-400 shrink-0" />
-                              )}
-                              <span className="truncate">{r.name}</span>
-                            </span>
-                            <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded-xs font-mono font-bold shrink-0 border ${
-                                r.dangerLevel.includes("Alto")
-                                  ? "bg-red-950 text-red-300 border-red-800"
-                                  : "bg-amber-950 text-amber-300 border-amber-800"
-                              }`}
-                            >
-                              {r.dangerLevel.includes("Alto") ? "Alto Risco" : "Médio"}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground line-clamp-1 mb-1">
-                            🛣️ {r.surface} · Conecta: {r.destinations}
-                          </p>
-                          <div className="flex items-center justify-between text-[10px] pt-1 mt-1 border-t border-border/30">
-                            <span className="text-muted-foreground/80 font-mono">
-                              Início: X {r.points[0][0]} Z {r.points[0][1]}
-                            </span>
-                            <span className="text-orange-400 group-hover:underline">
-                              Ver Traçado →
-                            </span>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+                <button
+                  className="btn-primary text-xs py-1 px-3 shadow-xs shrink-0 flex items-center gap-1 font-bold"
+                  onClick={() => setShowInitScriptModal(true)}
+                >
+                  <FileCode className="size-3.5" />
+                  Ver Código
+                </button>
+              </div>
             </div>
           ) : (
             /* Conteúdo da Tab: Marcadores Salvos */
@@ -4280,12 +4799,17 @@ export function MapPanel() {
                         className="rounded-xs bg-card p-2.5 border border-border/60 text-xs space-y-2 shadow-2xs hover:border-border transition-colors"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span
-                            className="font-bold text-foreground text-sm truncate"
-                            title={item.name}
-                          >
-                            {item.name}
-                          </span>
+                          <div className="flex flex-col min-w-0">
+                            <span
+                              className="font-bold text-foreground text-sm truncate"
+                              title={item.name}
+                            >
+                              {getItemLabel(item.name)}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground font-mono truncate">
+                              {item.name}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-2">
                             <span
                               className={`text-[10px] px-2 py-0.5 rounded-xs font-mono font-bold border ${badge.badge}`}
@@ -4442,6 +4966,428 @@ export function MapPanel() {
             </div>
           );
         })()}
+
+      {/* MODAL DE SCRIPT INIT.C (PROTEÇÃO DE PVP POR ZONAS & RAID DE BASES) */}
+      {showInitScriptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-50">
+          <div className="panel max-w-3xl w-full max-h-[90vh] flex flex-col p-5 shadow-2xl border-primary/40 space-y-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-md bg-primary/20 text-primary">
+                  <FileCode className="size-5" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display text-foreground tracking-wide">
+                    Código do Servidor: init.c (PvP por Zonas & Raid)
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Código pronto para aplicar a proteção de PvP por zonas e o controle de danos em
+                    bases.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="btn-ghost size-8 p-0 text-muted-foreground hover:text-foreground text-sm"
+                onClick={() => setShowInitScriptModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Informações e Instruções Rápidas */}
+            <div className="bg-primary/10 border border-primary/30 p-3 rounded-sm text-xs space-y-1.5">
+              <span className="font-bold text-primary flex items-center gap-1.5">
+                <span>📋</span> Como aplicar no seu servidor Nitrado / Console (Xbox/PS) / PC:
+              </span>
+              <ol className="list-decimal list-inside space-y-1 text-foreground/90 text-[11px] leading-relaxed">
+                <li>
+                  Vá na aba <strong className="text-primary">Arquivos</strong> ou acesse o FTP do
+                  seu servidor Nitrado.
+                </li>
+                <li>
+                  Abra a pasta da sua missão (ex:{" "}
+                  <code className="bg-muted px-1 py-0.5 rounded-xs">
+                    dayzOffline.chernarusplus/init.c
+                  </code>
+                  ).
+                </li>
+                <li>
+                  Cole o código abaixo no final do arquivo e chame{" "}
+                  <code className="bg-muted px-1 py-0.5 rounded-xs">
+                    FronteiraZCombatManager.Init();
+                  </code>{" "}
+                  no início da função{" "}
+                  <code className="bg-muted px-1 py-0.5 rounded-xs">main()</code>.
+                </li>
+                <li>
+                  Salve o arquivo e reinicie o servidor. Fora das{" "}
+                  {pvpZones.filter((z) => z.enabled).length} zonas marcadas, tiros e dano entre
+                  sobreviventes estarão bloqueados!
+                </li>
+              </ol>
+            </div>
+
+            {/* Pré-visualização do Código Gerado */}
+            <div className="flex-1 overflow-hidden flex flex-col space-y-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="font-semibold">init.c (Enforce Script)</span>
+                <span className="font-mono text-[11px]">
+                  {pvpZones.filter((z) => z.enabled).length} Zonas de PvP · Raid:{" "}
+                  {raidConfig.raidEnabled ? "Ativado" : "Desativado"}
+                </span>
+              </div>
+              <div className="relative flex-1 overflow-auto rounded-sm border border-border bg-[#0d151c] p-3 text-xs font-mono text-emerald-400">
+                <pre className="whitespace-pre text-[11px] leading-tight">
+                  {generateInitPvpScript(pvpZones, raidConfig, pvpRestrictedMode)}
+                </pre>
+              </div>
+            </div>
+
+            {/* Rodapé com Botões de Ação */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60">
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-primary text-xs py-1.5 px-4 font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+                  onClick={() => {
+                    const code = generateInitPvpScript(pvpZones, raidConfig, pvpRestrictedMode);
+                    navigator.clipboard.writeText(code);
+                    toast.success("Código copiado para a área de transferência!");
+                  }}
+                >
+                  <Copy className="size-3.5" />
+                  Copiar Código init.c
+                </button>
+                <button
+                  className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 border border-border/60 hover:text-primary"
+                  onClick={() => {
+                    const code = generateInitPvpScript(pvpZones, raidConfig, pvpRestrictedMode);
+                    const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "init_pvp_protection.c";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    toast.success("Arquivo init_pvp_protection.c baixado!");
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  Baixar Arquivo .c
+                </button>
+              </div>
+
+              <button
+                className="btn-ghost text-xs py-1.5 px-4"
+                onClick={() => setShowInitScriptModal(false)}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE ADIÇÃO MANUAL DE ZONA (MILITAR OU PVP) POR COORDENADAS */}
+      {showAddZoneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-50">
+          <div className="panel max-w-xl w-full flex flex-col p-5 shadow-2xl border-primary/40 space-y-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`p-2 rounded-md ${
+                    showAddZoneModal === "military"
+                      ? "bg-amber-500/20 text-amber-400"
+                      : "bg-red-500/20 text-red-400"
+                  }`}
+                >
+                  {showAddZoneModal === "military" ? (
+                    <ShieldAlert className="size-5" />
+                  ) : (
+                    <Crosshair className="size-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-lg font-display text-foreground tracking-wide font-bold">
+                    {showAddZoneModal === "military"
+                      ? "Nova Zona Militar & Loot"
+                      : "Nova Zona de PvP / Safezone"}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Defina o nome, raio e coordenadas X e Z exatas de Chernarus.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="btn-ghost size-8 p-0 text-muted-foreground hover:text-foreground text-sm"
+                onClick={() => setShowAddZoneModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Formulário de Criação */}
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[11px] text-muted-foreground font-semibold block mb-1">
+                    Nome da Zona:
+                  </label>
+                  <input
+                    type="text"
+                    value={newZoneForm.name}
+                    onChange={(e) =>
+                      setNewZoneForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    placeholder="Ex: Posto Avançado Sul"
+                    className="field w-full text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground font-semibold block mb-1">
+                    Nome Curto / Tag:
+                  </label>
+                  <input
+                    type="text"
+                    value={newZoneForm.shortName}
+                    onChange={(e) =>
+                      setNewZoneForm((prev) => ({ ...prev, shortName: e.target.value }))
+                    }
+                    placeholder="Ex: Base Sul"
+                    className="field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Coordenadas X e Z */}
+              <div className="bg-secondary/40 p-3 rounded-sm border border-border/60 space-y-2">
+                <span className="font-semibold text-foreground flex items-center gap-1.5 text-xs">
+                  <MapPin className="size-3.5 text-primary" />
+                  Coordenadas no Mapa de Chernarus (0 a 15360):
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground font-mono block mb-0.5">
+                      Coordenada X:
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={SIZE}
+                      step={50}
+                      value={newZoneForm.x}
+                      onChange={(e) =>
+                        setNewZoneForm((prev) => ({ ...prev, x: Number(e.target.value) }))
+                      }
+                      className="field w-full font-mono text-xs font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground font-mono block mb-0.5">
+                      Coordenada Z:
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={SIZE}
+                      step={50}
+                      value={newZoneForm.z}
+                      onChange={(e) =>
+                        setNewZoneForm((prev) => ({ ...prev, z: Number(e.target.value) }))
+                      }
+                      className="field w-full font-mono text-xs font-bold"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Dica: Você também pode clicar diretamente no mapa usando o botão de criação por
+                  clique.
+                </p>
+              </div>
+
+              {/* Raio em Metros */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-semibold">Raio de Cobertura:</span>
+                  <span className="font-mono font-bold text-primary">
+                    {newZoneForm.radius} metros
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={4000}
+                  step={25}
+                  value={newZoneForm.radius}
+                  onChange={(e) =>
+                    setNewZoneForm((prev) => ({ ...prev, radius: Number(e.target.value) }))
+                  }
+                  className="w-full accent-primary h-2 bg-secondary rounded-lg cursor-pointer"
+                />
+              </div>
+
+              {/* Opções específicas para Militar vs PvP */}
+              {showAddZoneModal === "military" ? (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground font-semibold block mb-1">
+                      Tier de Loot:
+                    </label>
+                    <select
+                      value={newZoneForm.tier}
+                      onChange={(e) =>
+                        setNewZoneForm((prev) => ({
+                          ...prev,
+                          tier: e.target.value as MilitaryTier,
+                        }))
+                      }
+                      className="field w-full text-xs"
+                    >
+                      <option value="Tier 1">Tier 1 (Costa / Inicial)</option>
+                      <option value="Tier 2">Tier 2 (Centro-Sul)</option>
+                      <option value="Tier 3">Tier 3 (Centro-Norte)</option>
+                      <option value="Tier 4">Tier 4 (Extremo Militar / Tisy)</option>
+                      <option value="Zona Tóxica (Tier 4)">Zona Tóxica (Gás NBC)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground font-semibold block mb-1">
+                      Tipo de Instalação:
+                    </label>
+                    <select
+                      value={newZoneForm.zoneType}
+                      onChange={(e) =>
+                        setNewZoneForm((prev) => ({
+                          ...prev,
+                          zoneType: e.target.value as MilitaryZoneType,
+                        }))
+                      }
+                      className="field w-full text-xs"
+                    >
+                      <option value="Complexo Militar Principal">Complexo Militar Principal</option>
+                      <option value="Aeroporto Militar">Aeroporto Militar</option>
+                      <option value="Posto Avançado de Bloqueio">Posto Avançado de Bloqueio</option>
+                      <option value="Acampamento Militar de Tendas">
+                        Acampamento Militar de Tendas
+                      </option>
+                      <option value="Instalação Estratégica & Radar">
+                        Instalação Estratégica & Radar
+                      </option>
+                      <option value="Zona de Contaminação Tóxica (NBC)">
+                        Zona de Contaminação Tóxica (NBC)
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground font-semibold block mb-1">
+                      Tipo de Regra:
+                    </label>
+                    <select
+                      value={newZoneForm.pvpType}
+                      onChange={(e) =>
+                        setNewZoneForm((prev) => ({
+                          ...prev,
+                          pvpType: e.target.value as any,
+                        }))
+                      }
+                      className="field w-full text-xs font-semibold"
+                    >
+                      <option value="pvp_allowed">⚔️ Zona de PvP Liberado (Tiro permitido)</option>
+                      <option value="safezone">🛡️ Safezone PvE Protegida (Tiro bloqueado)</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Rodapé com Salvar e Cancelar */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/60">
+              <button
+                className="btn-ghost text-xs py-1.5 px-4"
+                onClick={() => setShowAddZoneModal(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn-primary text-xs py-1.5 px-5 font-bold shadow-sm"
+                onClick={() => {
+                  const finalName =
+                    newZoneForm.name.trim() ||
+                    (showAddZoneModal === "military"
+                      ? `Zona Militar ${militaryZones.length + 1}`
+                      : `Zona de PvP ${pvpZones.length + 1}`);
+                  const finalShort =
+                    newZoneForm.shortName.trim() ||
+                    (showAddZoneModal === "military"
+                      ? `Base ${militaryZones.length + 1}`
+                      : `PVP ${pvpZones.length + 1}`);
+
+                  if (showAddZoneModal === "military") {
+                    const newZ: MilitaryZone = {
+                      id: `custom-mil-${Date.now()}`,
+                      name: finalName,
+                      shortName: finalShort,
+                      x: Math.max(0, Math.min(SIZE, newZoneForm.x)),
+                      z: Math.max(0, Math.min(SIZE, newZoneForm.z)),
+                      radius: Math.max(50, Math.min(10000, newZoneForm.radius)),
+                      tier: newZoneForm.tier,
+                      zoneType: newZoneForm.zoneType,
+                      pvpDanger: "Alto Risco",
+                      description:
+                        newZoneForm.description.trim() ||
+                        `Zona militar personalizada criada em X:${newZoneForm.x} Z:${newZoneForm.z}.`,
+                      structures: ["Quartéis Militares", "Guaritas de Perímetro", "Paiol de Armas"],
+                      keyLoot: [
+                        "Fuzis de Assalto",
+                        "Coletes Táticos",
+                        "Munições",
+                        "Mochilas Militares",
+                      ],
+                    };
+                    handleAddMilitaryZone(newZ);
+                  } else {
+                    const newP: PvpZone = {
+                      id: `pvp-${Date.now()}`,
+                      name: finalName,
+                      shortName: finalShort,
+                      type: newZoneForm.pvpType,
+                      x: Math.max(0, Math.min(SIZE, newZoneForm.x)),
+                      z: Math.max(0, Math.min(SIZE, newZoneForm.z)),
+                      radius: Math.max(50, Math.min(5000, newZoneForm.radius)),
+                      enabled: true,
+                      schedule: "always",
+                      enterNotification:
+                        newZoneForm.pvpType === "pvp_allowed"
+                          ? `⚠️ ATENÇÃO: Você entrou na Zona de PVP (${finalName})! Combate liberado!`
+                          : `🛡️ SEGURO: Você entrou na Safezone PvE (${finalName})! Dano bloqueado.`,
+                      exitNotification:
+                        newZoneForm.pvpType === "pvp_allowed"
+                          ? `🛡️ SEGURO: Você saiu da Zona de PVP! Combate DESATIVADO.`
+                          : `⚠️ ATENÇÃO: Você saiu da Safezone PvE! Cuidado ao explorar.`,
+                      blockBulletDamageOutside: true,
+                      blockMeleeDamageOutside: true,
+                      color: newZoneForm.pvpType === "pvp_allowed" ? "#ef4444" : "#10b981",
+                    };
+                    const updated = [...pvpZones, newP];
+                    setPvpZones(updated);
+                    savePvpZones(updated);
+                    setSelectedPvpZoneId(newP.id);
+                    setActiveTab("pvp");
+                    focusOnLocation(newP.x, newP.z, 2.5);
+                    toast.success(`Zona "${newP.name}" criada com sucesso!`);
+                  }
+
+                  setShowAddZoneModal(null);
+                }}
+              >
+                Criar e Posicionar no Mapa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

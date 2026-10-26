@@ -2,7 +2,5 @@
   "name": "Fronteira Z Editor · Servidor Nitrado Xbox",
   "description": "Editor completo para servidores DayZ Xbox hospedados na Nitrado: loot, eventos, gameplay, peso e configurações.",
   "permissions": [],
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

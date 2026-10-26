@@ -12,6 +12,7 @@ import { FilesPanel } from "@/components/editor/FilesPanel";
 import { ServerPanel } from "@/components/editor/ServerPanel";
 import { MapPanel } from "@/components/editor/MapPanel";
 import { ToolsPanel } from "@/components/editor/ToolsPanel";
+import { ClothingSlotsEditor } from "@/components/editor/ClothingSlotsEditor";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -38,6 +39,7 @@ const TABS = [
   "Servidor",
   "Mapa",
   "Loot",
+  "Roupas e Slots",
   "Animais e Zumbis",
   "Peso",
   "Gameplay",
@@ -262,6 +264,7 @@ function Index() {
       <section className="p-4">
         {tab === "Servidor" && <ServerPanel s={session} gs={gs} reload={loadGs} root={root} />}
         {tab === "Loot" && <TypesEditor s={session} />}
+        {tab === "Roupas e Slots" && <ClothingSlotsEditor />}
         {tab === "Animais e Zumbis" && <CreatureLootEditor s={session} />}
         {tab === "Peso" && <WeightPanel gameplay={gameplay} />}
         {tab === "Gameplay" && <GameplayEditor s={session} onJson={setGameplay} />}

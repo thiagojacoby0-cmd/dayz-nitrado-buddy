@@ -2,10 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { FileState, useRemoteFile } from "./useFile";
-import { ITEMS, ITEM_LABELS } from "@/lib/demo-data";
+import { ITEMS, ITEM_LABELS, getItemLabel } from "@/lib/demo-data";
+import {
+  FileCode,
+  Copy,
+  Sparkles,
+  SlidersHorizontal,
+  Plus,
+  RotateCcw,
+  PackageCheck,
+  Beef,
+  Skull,
+  ShieldAlert,
+} from "lucide-react";
 
 export type CreatureDropItem = {
   name: string;
+  count: number; // Quantidade de unidades deste item que caem ao morrer (ex: 1x, 2x, 4x)
   chance: string;
   quantmin: string;
   quantmax: string;
@@ -178,30 +191,49 @@ function parsePresetsXml(xml: string): Record<string, CreatureDropItem[]> {
   try {
     const doc = new DOMParser().parseFromString(xml, "text/xml");
 
+    const parseGroupItems = (parentEl: Element): CreatureDropItem[] => {
+      const items: CreatureDropItem[] = [];
+      Array.from(parentEl.getElementsByTagName("item")).forEach((i) => {
+        const name = i.getAttribute("name");
+        if (!name) return;
+        const chance = i.getAttribute("chance") ?? "1.00";
+        const quantmin = i.getAttribute("quantmin") ?? "-1";
+        const quantmax = i.getAttribute("quantmax") ?? "-1";
+
+        const existing = items.find(
+          (it) =>
+            it.name === name &&
+            it.chance === chance &&
+            it.quantmin === quantmin &&
+            it.quantmax === quantmax,
+        );
+        if (existing) {
+          existing.count = (existing.count || 1) + 1;
+        } else {
+          items.push({
+            name,
+            count: 1,
+            chance,
+            quantmin,
+            quantmax,
+          });
+        }
+      });
+      return items;
+    };
+
     // LootPresets (Zombies)
     Array.from(doc.getElementsByTagName("lootPresets")).forEach((lp) => {
       const name = lp.getAttribute("name");
       if (!name) return;
-      const items: CreatureDropItem[] = Array.from(lp.getElementsByTagName("item")).map((i) => ({
-        name: i.getAttribute("name") ?? "",
-        chance: i.getAttribute("chance") ?? "1.00",
-        quantmin: i.getAttribute("quantmin") ?? "-1",
-        quantmax: i.getAttribute("quantmax") ?? "-1",
-      }));
-      result[name] = items;
+      result[name] = parseGroupItems(lp);
     });
 
     // Cargo presets (Animals / Custom)
     Array.from(doc.getElementsByTagName("cargo")).forEach((cg) => {
       const name = cg.getAttribute("name");
       if (!name) return;
-      const items: CreatureDropItem[] = Array.from(cg.getElementsByTagName("item")).map((i) => ({
-        name: i.getAttribute("name") ?? "",
-        chance: i.getAttribute("chance") ?? "1.00",
-        quantmin: i.getAttribute("quantmin") ?? "-1",
-        quantmax: i.getAttribute("quantmax") ?? "-1",
-      }));
-      result[name] = items;
+      result[name] = parseGroupItems(cg);
     });
   } catch (e) {
     console.error("Erro ao analisar cfgrandompresets.xml:", e);
@@ -244,9 +276,12 @@ function serializePresetsXml(
   Object.entries(zombieState).forEach(([presetName, items]) => {
     zombieXml += `\t<lootPresets name="${presetName}">\n`;
     items.forEach((it) => {
+      const count = Math.max(1, Math.min(50, it.count || 1));
       const qmin = it.quantmin && it.quantmin !== "-1" ? ` quantmin="${it.quantmin}"` : "";
       const qmax = it.quantmax && it.quantmax !== "-1" ? ` quantmax="${it.quantmax}"` : "";
-      zombieXml += `\t\t<item name="${it.name}" chance="${it.chance || "1.00"}"${qmin}${qmax} />\n`;
+      for (let c = 0; c < count; c++) {
+        zombieXml += `\t\t<item name="${it.name}" chance="${it.chance || "1.00"}"${qmin}${qmax} />\n`;
+      }
     });
     zombieXml += `\t</lootPresets>\n`;
   });
@@ -256,9 +291,12 @@ function serializePresetsXml(
   Object.entries(animalState).forEach(([presetName, items]) => {
     animalXml += `\t<cargo chance="1.0" name="${presetName}">\n`;
     items.forEach((it) => {
+      const count = Math.max(1, Math.min(50, it.count || 1));
       const qmin = it.quantmin && it.quantmin !== "-1" ? ` quantmin="${it.quantmin}"` : "";
       const qmax = it.quantmax && it.quantmax !== "-1" ? ` quantmax="${it.quantmax}"` : "";
-      animalXml += `\t\t<item name="${it.name}" chance="${it.chance || "1.00"}"${qmin}${qmax} />\n`;
+      for (let c = 0; c < count; c++) {
+        animalXml += `\t\t<item name="${it.name}" chance="${it.chance || "1.00"}"${qmin}${qmax} />\n`;
+      }
     });
     animalXml += `\t</cargo>\n`;
   });
@@ -304,6 +342,35 @@ export function CreatureLootEditor({ s }: { s: Session }) {
     }
   }, [f.text]);
 
+  const setAllCountsInGroup = (groupId: string, isAnimal: boolean, count: number) => {
+    const patcher = (prev: Record<string, CreatureDropItem[]>) => ({
+      ...prev,
+      [groupId]: (prev[groupId] ?? []).map((it) => ({ ...it, count })),
+    });
+    if (isAnimal) setAnimalData(patcher);
+    else setZombieData(patcher);
+    setDirty(true);
+    toast.success(`Quantidade de cada item definida para ${count}x unidades!`);
+  };
+
+  const copyPresetXml = (groupId: string, isAnimal: boolean) => {
+    const items = (isAnimal ? animalData[groupId] : zombieData[groupId]) ?? [];
+    let xml = isAnimal
+      ? `<!-- cfgrandompresets.xml - Cargo de Animais -->\n<cargo chance="1.0" name="${groupId}">\n`
+      : `<!-- cfgrandompresets.xml - Loot de Zumbis -->\n<lootPresets name="${groupId}">\n`;
+    items.forEach((it) => {
+      const count = Math.max(1, it.count || 1);
+      const qmin = it.quantmin && it.quantmin !== "-1" ? ` quantmin="${it.quantmin}"` : "";
+      const qmax = it.quantmax && it.quantmax !== "-1" ? ` quantmax="${it.quantmax}"` : "";
+      for (let c = 0; c < count; c++) {
+        xml += `    <item name="${it.name}" chance="${it.chance || "1.00"}"${qmin}${qmax} />\n`;
+      }
+    });
+    xml += isAnimal ? `</cargo>` : `</lootPresets>`;
+    navigator.clipboard.writeText(xml);
+    toast.success(`Tag XML de ${groupId} copiada para a área de transferência!`);
+  };
+
   const updateItem = (
     groupId: string,
     isAnimal: boolean,
@@ -348,26 +415,34 @@ export function CreatureLootEditor({ s }: { s: Session }) {
     const isAnimal = ANIMAL_GROUPS.some((g) => g.id === pickerTargetGroup);
     const newItem: CreatureDropItem = {
       name: itemName,
+      count: 1,
       chance: "1.00",
       quantmin: "100",
       quantmax: "100",
     };
 
-    if (isAnimal) {
-      setAnimalData((prev) => ({
-        ...prev,
-        [pickerTargetGroup]: [...(prev[pickerTargetGroup] ?? []), newItem],
-      }));
-    } else {
-      setZombieData((prev) => ({
-        ...prev,
-        [pickerTargetGroup]: [...(prev[pickerTargetGroup] ?? []), newItem],
-      }));
-    }
+    const updater = (prev: Record<string, CreatureDropItem[]>) => {
+      const currentList = prev[pickerTargetGroup] ?? [];
+      const existingIdx = currentList.findIndex((i) => i.name === itemName);
+      if (existingIdx >= 0) {
+        const updated = [...currentList];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          count: (updated[existingIdx].count || 1) + 1,
+        };
+        return { ...prev, [pickerTargetGroup]: updated };
+      }
+      return { ...prev, [pickerTargetGroup]: [...currentList, newItem] };
+    };
+
+    if (isAnimal) setAnimalData(updater);
+    else setZombieData(updater);
 
     setDirty(true);
     setPickerTargetGroup(null);
-    toast.success(`Item "${ITEM_LABELS[itemName] ?? itemName}" adicionado aos drops!`);
+    toast.success(
+      `Item "${ITEM_LABELS[itemName] ?? itemName}" adicionado com quantidade configurável!`,
+    );
   };
 
   const setAllChancesInGroup = (groupId: string, isAnimal: boolean, chance: string) => {
@@ -424,7 +499,7 @@ export function CreatureLootEditor({ s }: { s: Session }) {
   const catalogFiltered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return ITEMS.filter(([name, , cat]) => {
-      const label = (ITEM_LABELS[name] ?? "").toLowerCase();
+      const label = (ITEM_LABELS[name] ?? getItemLabel(name)).toLowerCase();
       const matchQ = !q || name.toLowerCase().includes(q) || label.includes(q);
       const matchCat = !filterCat || cat === filterCat;
       return matchQ && matchCat;
@@ -545,7 +620,8 @@ export function CreatureLootEditor({ s }: { s: Session }) {
 
                 <div className="flex items-center gap-3">
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-secondary border border-border text-foreground font-mono">
-                    {items.length} {items.length === 1 ? "item configurado" : "itens configurados"}
+                    {items.length} {items.length === 1 ? "item" : "itens"} (
+                    {items.reduce((s, it) => s + (it.count || 1), 0)} un. no drop)
                   </span>
                   <span className="text-primary text-lg font-bold">{isOpen ? "▾" : "▸"}</span>
                 </div>
@@ -556,13 +632,44 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                 <div className="p-4 pt-1 border-t border-border space-y-4">
                   {/* Barra de Ações Rápidas do Grupo */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-md bg-secondary/40 border border-border/50 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-muted-foreground font-semibold">Chances rápidas:</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted-foreground font-semibold">Qtd de cada item:</span>
+                      <button
+                        className="btn-ghost h-6 px-2 text-[11px] text-foreground hover:bg-secondary"
+                        onClick={() => setAllCountsInGroup(group.id, isAnimal, 1)}
+                      >
+                        1x em Todos
+                      </button>
+                      <button
+                        className="btn-ghost h-6 px-2 text-[11px] text-blue-400 hover:bg-blue-400/10"
+                        onClick={() => setAllCountsInGroup(group.id, isAnimal, 2)}
+                      >
+                        2x em Todos
+                      </button>
+                      {isAnimal ? (
+                        <button
+                          className="btn-ghost h-6 px-2 text-[11px] text-amber-400 hover:bg-amber-400/10"
+                          onClick={() => setAllCountsInGroup(group.id, isAnimal, 4)}
+                        >
+                          🥩 Carnes x4
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-ghost h-6 px-2 text-[11px] text-amber-400 hover:bg-amber-400/10"
+                          onClick={() => setAllCountsInGroup(group.id, isAnimal, 3)}
+                        >
+                          🪖 Drops x3
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted-foreground font-semibold">Chances:</span>
                       <button
                         className="btn-ghost h-6 px-2 text-[11px]"
                         onClick={() => setAllChancesInGroup(group.id, isAnimal, "1.00")}
                       >
-                        100% Sempre Cair
+                        100% Sempre
                       </button>
                       <button
                         className="btn-ghost h-6 px-2 text-[11px]"
@@ -570,31 +677,31 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                       >
                         50% Metade
                       </button>
-                      <button
-                        className="btn-ghost h-6 px-2 text-[11px]"
-                        onClick={() => setAllChancesInGroup(group.id, isAnimal, "0.20")}
-                      >
-                        20% Raro
-                      </button>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-muted-foreground font-semibold">
-                        Durabilidade de todos:
-                      </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted-foreground font-semibold">Pilha:</span>
                       <button
                         className="btn-ghost h-6 px-2 text-[11px] text-green-400"
                         onClick={() => setAllDurabilityInGroup(group.id, isAnimal, "100", "100")}
                       >
-                        🟢 100% Pristine
+                        🟢 100% Cheia
                       </button>
                       <button
                         className="btn-ghost h-6 px-2 text-[11px] text-yellow-400"
                         onClick={() => setAllDurabilityInGroup(group.id, isAnimal, "50", "80")}
                       >
-                        🟡 Desgastado
+                        🟡 50-80% Média
                       </button>
                     </div>
+
+                    <button
+                      className="btn-ghost h-6 px-2 text-[11px] text-primary border border-primary/30 hover:bg-primary/10 ml-auto"
+                      onClick={() => copyPresetXml(group.id, isAnimal)}
+                      title="Copiar snippet XML deste grupo para cfgrandompresets.xml"
+                    >
+                      📋 Copiar XML do Grupo
+                    </button>
                   </div>
 
                   {/* Tabela de Itens que Caem */}
@@ -615,11 +722,14 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <div className="grid grid-cols-[1fr_120px_140px_32px] gap-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <div className="grid grid-cols-[1fr_150px_120px_150px_32px] gap-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                         <span>Item que Cai</span>
-                        <span title="Chance de 0 a 100% de cair">Chance de Drop ⓘ</span>
-                        <span title="Durabilidade e carga do item ao cair">
-                          Durabilidade / Carga ⓘ
+                        <span title="Quantidade de unidades deste item que caem ao morrer">
+                          Qtd a Dropar (Unidades) ⓘ
+                        </span>
+                        <span title="Chance de 0 a 100% deste item cair">Chance de Drop ⓘ</span>
+                        <span title="Tamanho da pilha ou durabilidade de cada unidade">
+                          Pilha / Condição ⓘ
                         </span>
                         <span />
                       </div>
@@ -631,7 +741,7 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                         return (
                           <div
                             key={`${it.name}-${idx}`}
-                            className="grid grid-cols-[1fr_120px_140px_32px] items-center gap-2 p-2 rounded-sm border border-border bg-background/50 hover:border-primary/40 transition-colors"
+                            className="grid grid-cols-[1fr_150px_120px_150px_32px] items-center gap-2 p-2 rounded-sm border border-border bg-background/50 hover:border-primary/40 transition-colors"
                           >
                             {/* Nome do Item */}
                             <div className="min-w-0 pr-2">
@@ -646,6 +756,72 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                                 title={it.name}
                               >
                                 {it.name}
+                              </div>
+                            </div>
+
+                            {/* Quantidade deste item específico a dropar */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  className="btn-ghost h-6 w-6 p-0 text-xs font-bold bg-secondary/80 hover:bg-primary/20 text-foreground"
+                                  onClick={() =>
+                                    updateItem(group.id, isAnimal, idx, {
+                                      count: Math.max(1, (it.count || 1) - 1),
+                                    })
+                                  }
+                                  title="Diminuir quantidade de unidades"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  value={it.count || 1}
+                                  onChange={(e) => {
+                                    const val = Math.max(
+                                      1,
+                                      Math.min(50, parseInt(e.target.value) || 1),
+                                    );
+                                    updateItem(group.id, isAnimal, idx, { count: val });
+                                  }}
+                                  className="field h-6 w-12 text-center font-mono font-bold text-xs p-0 text-primary bg-background"
+                                  title="Quantidade de unidades deste item a dropar"
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-ghost h-6 w-6 p-0 text-xs font-bold bg-secondary/80 hover:bg-primary/20 text-foreground"
+                                  onClick={() =>
+                                    updateItem(group.id, isAnimal, idx, {
+                                      count: Math.min(50, (it.count || 1) + 1),
+                                    })
+                                  }
+                                  title="Aumentar quantidade de unidades"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-1 text-[10px]">
+                                {[1, 2, 4].map((cnt) => (
+                                  <button
+                                    key={cnt}
+                                    type="button"
+                                    onClick={() =>
+                                      updateItem(group.id, isAnimal, idx, { count: cnt })
+                                    }
+                                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono transition-colors ${
+                                      (it.count || 1) === cnt
+                                        ? "bg-primary text-primary-foreground font-bold"
+                                        : "bg-secondary text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {cnt}x
+                                  </button>
+                                ))}
+                                <span className="text-[10px] text-muted-foreground font-mono ml-auto">
+                                  {it.count || 1} un.
+                                </span>
                               </div>
                             </div>
 
@@ -674,24 +850,31 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                               />
                             </div>
 
-                            {/* Durabilidade / Carga */}
-                            <div>
+                            {/* Quantidade / Pilha / Durabilidade */}
+                            <div className="space-y-1">
                               <select
                                 className="field w-full text-[11px] h-7 cursor-pointer"
                                 value={
                                   it.quantmin === "100" && it.quantmax === "100"
                                     ? "100"
-                                    : it.quantmin === "50"
-                                      ? "50"
-                                      : it.quantmin === "20"
-                                        ? "20"
-                                        : "-1"
+                                    : it.quantmin === "75"
+                                      ? "75"
+                                      : it.quantmin === "50"
+                                        ? "50"
+                                        : it.quantmin === "20"
+                                          ? "20"
+                                          : "-1"
                                 }
                                 onChange={(e) => {
                                   const v = e.target.value;
                                   if (v === "100")
                                     updateItem(group.id, isAnimal, idx, {
                                       quantmin: "100",
+                                      quantmax: "100",
+                                    });
+                                  else if (v === "75")
+                                    updateItem(group.id, isAnimal, idx, {
+                                      quantmin: "75",
                                       quantmax: "100",
                                     });
                                   else if (v === "50")
@@ -711,11 +894,17 @@ export function CreatureLootEditor({ s }: { s: Session }) {
                                     });
                                 }}
                               >
-                                <option value="100">🟢 100% Pristine</option>
-                                <option value="50">🟡 Desgastado (50-80%)</option>
-                                <option value="20">🔴 Danificado (20-40%)</option>
+                                <option value="100">🟢 100% Pilha / Pristine</option>
+                                <option value="75">📦 75-100% Quase Cheia</option>
+                                <option value="50">🟡 50-80% Média / Desgastado</option>
+                                <option value="20">🔴 20-40% Pouca / Danificado</option>
                                 <option value="-1">⚪ Padrão DayZ (-1)</option>
                               </select>
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                                <span>
+                                  quant: {it.quantmin ?? "-1"} a {it.quantmax ?? "-1"}
+                                </span>
+                              </div>
                             </div>
 
                             {/* Botão Remover */}

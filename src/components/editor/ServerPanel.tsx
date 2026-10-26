@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, isDemo, readFile, writeFile, type Session } from "@/lib/nitrado";
+import { Bomb, Shield, Crosshair } from "lucide-react";
+import {
+  loadBaseRaidConfig,
+  saveBaseRaidConfig,
+  loadPvpRestrictedMode,
+  savePvpRestrictedMode,
+  loadPvpZones,
+  type BaseRaidConfig,
+  type PvpZone,
+} from "@/lib/pvp-raid-manager";
 
 const PRESET_SLOTS = [
   { slots: 10, label: "Tático (10 Vagas)" },
@@ -460,6 +470,36 @@ export function ServerPanel({ s, gs, reload, root }: ServerPanelProps) {
   const onlinePlayers = SAMPLE_PLAYERS.slice(0, currentOnline);
   const hasChanges = Object.keys(changed).length > 0 || cfgModifiedManually;
 
+  const [raidConfig, setRaidConfig] = useState<BaseRaidConfig>(() => loadBaseRaidConfig());
+  const [pvpRestricted, setPvpRestricted] = useState<boolean>(() => loadPvpRestrictedMode());
+  const [pvpZones] = useState<PvpZone[]>(() => loadPvpZones());
+
+  const handleToggleRaidQuick = () => {
+    const next = { ...raidConfig, raidEnabled: !raidConfig.raidEnabled };
+    setRaidConfig(next);
+    saveBaseRaidConfig(next);
+    if (next.raidEnabled) {
+      toast.success("💥 Raid de Bases ATIVADO: Danos em portões e paredes liberados!");
+    } else {
+      toast.info("🛡️ Raid de Bases DESATIVADO: Bases 100% protegidas contra danos!");
+    }
+  };
+
+  const handleTogglePvpRestricted = () => {
+    const next = !pvpRestricted;
+    setPvpRestricted(next);
+    savePvpRestrictedMode(next);
+    if (next) {
+      toast.success(
+        "🛡️ Modo PvP Restrito ATIVADO: Fora das zonas marcadas, tiro em jogadores está BLOQUEADO!",
+      );
+    } else {
+      toast.info(
+        "⚔️ Modo PvP Livre (Vanilla): Tiro em jogadores permitido em qualquer lugar do mapa.",
+      );
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Barra Flutuante de Alterações Pendentes */}
@@ -625,6 +665,99 @@ export function ServerPanel({ s, gs, reload, root }: ServerPanelProps) {
               className={`h-full transition-all duration-300 ${getOccupancyColor().split(" ")[0]}`}
               style={{ width: `${occupancyPercent}%` }}
             />
+          </div>
+        </div>
+
+        {/* Painel Rápido de Status de Raid e Zonas de PvP */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-border/50">
+          {/* Status do Raid de Bases */}
+          <div
+            className={`p-3 rounded-md border flex items-center justify-between gap-3 ${
+              raidConfig.raidEnabled
+                ? "bg-amber-950/20 border-amber-500/50"
+                : "bg-emerald-950/20 border-emerald-500/50"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              {raidConfig.raidEnabled ? (
+                <div className="p-2 rounded-full bg-amber-500/20 text-amber-300">
+                  <Bomb className="size-4 animate-pulse" />
+                </div>
+              ) : (
+                <div className="p-2 rounded-full bg-emerald-500/20 text-emerald-300">
+                  <Shield className="size-4" />
+                </div>
+              )}
+              <div>
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground block">
+                  Raid de Bases (Danos em Construções)
+                </span>
+                <span
+                  className={`text-sm font-bold ${
+                    raidConfig.raidEnabled ? "text-amber-300" : "text-emerald-300"
+                  }`}
+                >
+                  {raidConfig.raidEnabled
+                    ? "💥 Raid Ativado (Dano Liberado)"
+                    : "🛡️ Bases Protegidas (Sem Danos)"}
+                </span>
+              </div>
+            </div>
+            <button
+              className={`btn text-xs py-1.5 px-3 font-semibold shadow-xs ${
+                raidConfig.raidEnabled
+                  ? "bg-amber-600 hover:bg-amber-500 text-white"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
+              }`}
+              onClick={handleToggleRaidQuick}
+            >
+              {raidConfig.raidEnabled ? "Desativar Raid" : "Ativar Raid"}
+            </button>
+          </div>
+
+          {/* Status das Zonas de PvP */}
+          <div
+            className={`p-3 rounded-md border flex items-center justify-between gap-3 ${
+              pvpRestricted
+                ? "bg-emerald-950/20 border-emerald-500/50"
+                : "bg-secondary/40 border-border"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`p-2 rounded-full ${
+                  pvpRestricted
+                    ? "bg-emerald-500/20 text-emerald-300"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                <Crosshair className="size-4" />
+              </div>
+              <div>
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground block">
+                  Regra de Tiro & Combate
+                </span>
+                <span
+                  className={`text-sm font-bold ${
+                    pvpRestricted ? "text-emerald-300" : "text-foreground"
+                  }`}
+                >
+                  {pvpRestricted
+                    ? `🛡️ PvP Restrito (${pvpZones.filter((z) => z.enabled).length} Zonas Ativas)`
+                    : "⚔️ PvP Livre no Mapa Todo"}
+                </span>
+              </div>
+            </div>
+            <button
+              className={`btn text-xs py-1.5 px-3 font-semibold shadow-xs ${
+                pvpRestricted
+                  ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  : "btn-ghost border border-border"
+              }`}
+              onClick={handleTogglePvpRestricted}
+            >
+              {pvpRestricted ? "PvP Restrito Ativo" : "Ativar Modo Zonas"}
+            </button>
           </div>
         </div>
       </div>

@@ -21,12 +21,12 @@ const MIL = ["Military"],
   MED = ["Medic"],
   SCHOOL = ["School"];
 
+import { DAYZ_ITEM_TRANSLATIONS, getItemLabel } from "./item-translations";
+
+export { DAYZ_ITEM_TRANSLATIONS, getItemLabel };
+
 export const ITEM_LABELS: Record<string, string> = {
-  // Rifles
-  M4A1: "M4A1 (Fuzil de assalto 5.56)",
-  AKM: "AKM (Fuzil de assalto 7.62)",
-  AK101: "AK-101 (Fuzil de assalto 5.56)",
-  AK74: "AK-74 (Fuzil de assalto 5.45)",
+  ...DAYZ_ITEM_TRANSLATIONS,
   AKS74U: "AKS-74U (Carabina compacta)",
   AURAX: "AUR A1/AX (Fuzil bullpup)",
   Aug: "AUR A1 (Bullpup militar)",

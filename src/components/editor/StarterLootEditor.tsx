@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { missionFile, type Session } from "@/lib/nitrado";
 import { FileState, useRemoteFile } from "./useFile";
-import { ITEMS, ITEM_LABELS } from "@/lib/demo-data";
+import { ITEMS, ITEM_LABELS, getItemLabel } from "@/lib/demo-data";
 
 export type StarterItem = {
   id: string;
@@ -511,7 +511,7 @@ export function StarterLootEditor({ s }: { s: Session }) {
   const catalogFiltered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return ITEMS.filter(([name, , cat]) => {
-      const label = (ITEM_LABELS[name] ?? "").toLowerCase();
+      const label = (ITEM_LABELS[name] ?? getItemLabel(name)).toLowerCase();
       const matchQ = !q || name.toLowerCase().includes(q) || label.includes(q);
       const matchCat = !filterCat || cat === filterCat;
       return matchQ && matchCat;
