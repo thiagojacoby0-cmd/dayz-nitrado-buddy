@@ -22,7 +22,7 @@ async function call(token: string, method: string, path: string, body?: unknown)
 }
 
 export const nitradoRequest = createServerFn({ method: "POST" })
-  .inputValidator(
+  .validator(
     (d: {
       token: string;
       method: "GET" | "POST" | "PUT" | "DELETE";
@@ -37,7 +37,7 @@ export const nitradoRequest = createServerFn({ method: "POST" })
   .handler(async ({ data }) => call(data.token, data.method, data.path, data.body));
 
 export const nitradoReadFile = createServerFn({ method: "POST" })
-  .inputValidator((d: { token: string; serviceId: string; file: string }) => d)
+  .validator((d: { token: string; serviceId: string; file: string }) => d)
   .handler(async ({ data }) => {
     const path = `/services/${encodeURIComponent(data.serviceId)}/gameservers/file_server/download?file=${encodeURIComponent(data.file)}`;
     const json = JSON.parse(await call(data.token, "GET", path));
@@ -49,7 +49,7 @@ export const nitradoReadFile = createServerFn({ method: "POST" })
   });
 
 export const nitradoWriteFile = createServerFn({ method: "POST" })
-  .inputValidator(
+  .validator(
     (d: { token: string; serviceId: string; dir: string; name: string; content: string }) => d,
   )
   .handler(async ({ data }) => {
